@@ -1,0 +1,23 @@
+{
+  "mesh": {
+    "rows": 32,
+    "cols": 32,
+    "link_bandwidth_bytes_per_cycle": 32.0,
+    "router_latency_cycles": 1.0,
+    "link_queue_capacity": 8,
+    "compute_throughput_ops_per_cycle": 256.0,
+    "local_sram_bytes_per_pe": 49152,
+    "memory_bandwidth_bytes_per_cycle": 128.0
+  },
+  "workload": {
+    "type": "memory_copy",
+    "elements": 8192,
+    "bytes_per_element": 4,
+    "packet_payload_bytes": 1024,
+    "source_row": 0,
+    "source_col": 0,
+    "dest_row": 31,
+    "dest_col": 31,
+    "injection_gap_cycles": 0.0
+  }
+}
