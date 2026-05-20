@@ -35,6 +35,12 @@ Run the tiled GEMM workload:
 python -m wafersim.cli --config configs/gemm.json
 ```
 
+Run the CSL-topic concept demo:
+
+```bash
+python -m wafersim.cli --config configs/csl_topics.json
+```
+
 Run tests:
 
 ```bash
@@ -57,6 +63,31 @@ clean open model that keeps the same class of architectural questions visible:
 PE granularity, local compute/communication balance, link pressure, routing, and
 eventual hardware interfaces.
 
+## CSL Topic Coverage
+
+`configs/csl_topics.json` runs concept-level models for the CSL examples shown
+in the public Cerebras SDK tutorial list:
+
+- memcpy-style streaming
+- arrays and pointers
+- library-like compute kernels
+- streaming wavelet data
+- sparse tensor wavelet filtering
+- sentinels
+- switches and control entrypoints
+- filters
+- FIFOs
+- `@map`-style coordinate mapping
+- collective broadcast/reduce traffic
+- debug and simprint logs
+- color swap
+- WSE-3-style microthread concurrency
+- output queue reuse
+
+These are simulator abstractions, not compiled CSL programs. They are useful for
+studying data movement, memory pressure, FIFO backpressure, and PE activity
+before deciding whether to target CSL, Chisel RTL, or another hardware path.
+
 ## Current Outputs
 
 The CLI prints:
@@ -74,12 +105,13 @@ src/wafersim/
   config.py      simulator parameters
   pe.py          processing element timing model
   network.py     mesh, links, routing, packet metrics
-  workloads.py   memory-copy and stencil workload generators
+  workloads.py   memory-copy, GEMM, stencil, and CSL-topic workload generators
   simulator.py   orchestration and trace export
   cli.py         command-line entry point
 configs/
   memory_copy.json
   gemm.json
+  csl_topics.json
   medium_stencil.json
 docs/
   hardware_mapping.md

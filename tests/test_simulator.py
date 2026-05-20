@@ -4,7 +4,8 @@ import unittest
 
 import simpy
 
-from wafersim.config import MemoryCopyWorkloadConfig, MeshConfig, SimulationConfig
+from wafersim.config import CslDemoWorkloadConfig, MemoryCopyWorkloadConfig
+from wafersim.config import MeshConfig, SimulationConfig
 from wafersim.config import StencilWorkloadConfig
 from wafersim.network import WaferMesh, percentile
 from wafersim.simulator import run_simulation, strip_internal_records
@@ -99,6 +100,31 @@ class SimulatorTests(unittest.TestCase):
                     ),
                 )
             )
+
+    def test_csl_demo_runs_all_topic_models(self) -> None:
+        summary = run_simulation(
+            SimulationConfig(
+                mesh=MeshConfig(rows=4, cols=4),
+                workload=CslDemoWorkloadConfig(
+                    active_rows=2,
+                    active_cols=2,
+                    elements_per_pe=16,
+                    packet_payload_bytes=16,
+                    collective_payload_bytes=16,
+                    color_swap_payload_bytes=8,
+                ),
+            )
+        )
+        public_summary = strip_internal_records(summary)
+        topic_results = public_summary["workload"]["topic_results"]
+
+        self.assertEqual(public_summary["workload"]["type"], "csl_demo")
+        self.assertEqual(public_summary["workload"]["active_pes"], 4)
+        self.assertGreater(public_summary["packets"], 0)
+        self.assertIn("topic_1_arrays_and_pointers_bytes", topic_results)
+        self.assertIn("topic_9_fifo_items", topic_results)
+        self.assertIn("topic_11_collective_packets", topic_results)
+        self.assertIn("topic_15_microthread_tasks", topic_results)
 
 
 if __name__ == "__main__":

@@ -206,11 +206,88 @@ class GemmWorkloadConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class CslDemoWorkloadConfig:
+    type: str = "csl_demo"
+    active_rows: int = 4
+    active_cols: int = 4
+    elements_per_pe: int = 256
+    bytes_per_element: int = 4
+    packet_payload_bytes: int = 256
+    fifo_capacity: int = 4
+    wavelet_levels: int = 3
+    sparse_density: float = 0.25
+    collective_payload_bytes: int = 256
+    microthreads_per_pe: int = 4
+    output_queue_reuse_rounds: int = 2
+    color_swap_payload_bytes: int = 128
+    sentinel_bytes: int = 8
+
+    def validate(self) -> None:
+        if self.active_rows <= 0 or self.active_cols <= 0:
+            raise ValueError("active rows and cols must be positive")
+        if self.elements_per_pe <= 0:
+            raise ValueError("elements per PE must be positive")
+        if self.bytes_per_element <= 0:
+            raise ValueError("bytes per element must be positive")
+        if self.packet_payload_bytes <= 0:
+            raise ValueError("packet payload bytes must be positive")
+        if self.fifo_capacity <= 0:
+            raise ValueError("FIFO capacity must be positive")
+        if self.wavelet_levels <= 0:
+            raise ValueError("wavelet levels must be positive")
+        if not 0.0 <= self.sparse_density <= 1.0:
+            raise ValueError("sparse density must be between 0 and 1")
+        if self.collective_payload_bytes <= 0:
+            raise ValueError("collective payload bytes must be positive")
+        if self.microthreads_per_pe <= 0:
+            raise ValueError("microthreads per PE must be positive")
+        if self.output_queue_reuse_rounds <= 0:
+            raise ValueError("output queue reuse rounds must be positive")
+        if self.color_swap_payload_bytes <= 0:
+            raise ValueError("color swap payload bytes must be positive")
+        if self.sentinel_bytes <= 0:
+            raise ValueError("sentinel bytes must be positive")
+
+    @property
+    def active_pes(self) -> int:
+        return self.active_rows * self.active_cols
+
+    @property
+    def local_array_bytes_per_pe(self) -> int:
+        return self.elements_per_pe * self.bytes_per_element
+
+    @property
+    def memory_footprint_bytes_per_pe(self) -> int:
+        fifo_bytes = self.fifo_capacity * self.packet_payload_bytes
+        scratch_bytes = self.local_array_bytes_per_pe
+        return self.local_array_bytes_per_pe + fifo_bytes + scratch_bytes
+
+    @property
+    def wavelet_ops_per_pe(self) -> int:
+        return self.elements_per_pe * self.wavelet_levels * 4
+
+    @property
+    def sparse_ops_per_pe(self) -> int:
+        return int(self.elements_per_pe * self.sparse_density) * 2
+
+    @property
+    def library_ops_per_pe(self) -> int:
+        return self.elements_per_pe * 8
+
+    @property
+    def map_ops_per_pe(self) -> int:
+        return self.elements_per_pe
+
+
+@dataclass(frozen=True, slots=True)
 class SimulationConfig:
     mesh: MeshConfig = MeshConfig()
-    workload: StencilWorkloadConfig | MemoryCopyWorkloadConfig | GemmWorkloadConfig = (
-        StencilWorkloadConfig()
-    )
+    workload: (
+        StencilWorkloadConfig
+        | MemoryCopyWorkloadConfig
+        | GemmWorkloadConfig
+        | CslDemoWorkloadConfig
+    ) = StencilWorkloadConfig()
 
     def validate(self) -> None:
         self.mesh.validate()

@@ -1,0 +1,28 @@
+{
+  "mesh": {
+    "rows": 32,
+    "cols": 32,
+    "link_bandwidth_bytes_per_cycle": 32.0,
+    "router_latency_cycles": 1.0,
+    "link_queue_capacity": 8,
+    "compute_throughput_ops_per_cycle": 256.0,
+    "local_sram_bytes_per_pe": 49152,
+    "memory_bandwidth_bytes_per_cycle": 128.0
+  },
+  "workload": {
+    "type": "csl_demo",
+    "active_rows": 4,
+    "active_cols": 4,
+    "elements_per_pe": 256,
+    "bytes_per_element": 4,
+    "packet_payload_bytes": 256,
+    "fifo_capacity": 4,
+    "wavelet_levels": 3,
+    "sparse_density": 0.25,
+    "collective_payload_bytes": 256,
+    "microthreads_per_pe": 4,
+    "output_queue_reuse_rounds": 2,
+    "color_swap_payload_bytes": 128,
+    "sentinel_bytes": 8
+  }
+}

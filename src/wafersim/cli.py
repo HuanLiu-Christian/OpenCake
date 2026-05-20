@@ -5,7 +5,8 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
-from wafersim.config import GemmWorkloadConfig, MemoryCopyWorkloadConfig
+from wafersim.config import CslDemoWorkloadConfig, GemmWorkloadConfig
+from wafersim.config import MemoryCopyWorkloadConfig
 from wafersim.config import SimulationConfig
 from wafersim.config import StencilWorkloadConfig
 from wafersim.simulator import load_config, run_simulation, strip_internal_records
@@ -19,7 +20,7 @@ def main() -> None:
     parser.add_argument("--config", type=Path, help="JSON config file")
     parser.add_argument(
         "--workload",
-        choices=["stencil", "memory-copy", "array-stream", "gemm"],
+        choices=["stencil", "memory-copy", "array-stream", "gemm", "csl-demo"],
         help="workload type to run",
     )
     parser.add_argument("--rows", type=int, help="mesh rows")
@@ -112,6 +113,32 @@ def main() -> None:
         type=float,
         help="cycles between memory copy packet injections",
     )
+    parser.add_argument("--active-rows", type=int, help="CSL demo active PE rows")
+    parser.add_argument("--active-cols", type=int, help="CSL demo active PE columns")
+    parser.add_argument("--fifo-capacity", type=int, help="CSL demo FIFO capacity")
+    parser.add_argument("--wavelet-levels", type=int, help="CSL demo wavelet levels")
+    parser.add_argument("--sparse-density", type=float, help="CSL demo sparse density")
+    parser.add_argument(
+        "--collective-payload-bytes",
+        type=int,
+        help="CSL demo collective packet payload bytes",
+    )
+    parser.add_argument(
+        "--microthreads-per-pe",
+        type=int,
+        help="CSL demo microthreads per active PE",
+    )
+    parser.add_argument(
+        "--output-queue-reuse-rounds",
+        type=int,
+        help="CSL demo output queue reuse rounds",
+    )
+    parser.add_argument(
+        "--color-swap-payload-bytes",
+        type=int,
+        help="CSL demo color swap payload bytes",
+    )
+    parser.add_argument("--sentinel-bytes", type=int, help="CSL demo sentinel bytes")
     parser.add_argument(
         "--trace-jsonl",
         type=Path,
@@ -152,11 +179,25 @@ def apply_overrides(config: SimulationConfig, args: argparse.Namespace) -> Simul
 
 
 def select_workload_config(
-    workload: StencilWorkloadConfig | MemoryCopyWorkloadConfig | GemmWorkloadConfig,
+    workload: (
+        StencilWorkloadConfig
+        | MemoryCopyWorkloadConfig
+        | GemmWorkloadConfig
+        | CslDemoWorkloadConfig
+    ),
     workload_type: str | None,
-) -> StencilWorkloadConfig | MemoryCopyWorkloadConfig | GemmWorkloadConfig:
+) -> (
+    StencilWorkloadConfig
+    | MemoryCopyWorkloadConfig
+    | GemmWorkloadConfig
+    | CslDemoWorkloadConfig
+):
     if workload_type is None:
         return workload
+    if workload_type == "csl-demo":
+        return (
+            workload if isinstance(workload, CslDemoWorkloadConfig) else CslDemoWorkloadConfig()
+        )
     if workload_type == "gemm":
         return workload if isinstance(workload, GemmWorkloadConfig) else GemmWorkloadConfig()
     if workload_type in {"memory-copy", "array-stream"}:
@@ -169,10 +210,36 @@ def select_workload_config(
 
 
 def apply_workload_overrides(
-    workload: StencilWorkloadConfig | MemoryCopyWorkloadConfig | GemmWorkloadConfig,
+    workload: (
+        StencilWorkloadConfig
+        | MemoryCopyWorkloadConfig
+        | GemmWorkloadConfig
+        | CslDemoWorkloadConfig
+    ),
     args: argparse.Namespace,
-) -> StencilWorkloadConfig | MemoryCopyWorkloadConfig | GemmWorkloadConfig:
-    if isinstance(workload, GemmWorkloadConfig):
+) -> (
+    StencilWorkloadConfig
+    | MemoryCopyWorkloadConfig
+    | GemmWorkloadConfig
+    | CslDemoWorkloadConfig
+):
+    if isinstance(workload, CslDemoWorkloadConfig):
+        updates = {
+            "active_rows": args.active_rows,
+            "active_cols": args.active_cols,
+            "elements_per_pe": args.array_elements,
+            "bytes_per_element": args.bytes_per_element,
+            "packet_payload_bytes": args.packet_payload_bytes,
+            "fifo_capacity": args.fifo_capacity,
+            "wavelet_levels": args.wavelet_levels,
+            "sparse_density": args.sparse_density,
+            "collective_payload_bytes": args.collective_payload_bytes,
+            "microthreads_per_pe": args.microthreads_per_pe,
+            "output_queue_reuse_rounds": args.output_queue_reuse_rounds,
+            "color_swap_payload_bytes": args.color_swap_payload_bytes,
+            "sentinel_bytes": args.sentinel_bytes,
+        }
+    elif isinstance(workload, GemmWorkloadConfig):
         updates = {
             "m": args.gemm_m,
             "n": args.gemm_n,

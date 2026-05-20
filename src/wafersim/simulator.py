@@ -6,11 +6,13 @@ from typing import Any
 
 import simpy
 
-from wafersim.config import GemmWorkloadConfig, MemoryCopyWorkloadConfig
+from wafersim.config import CslDemoWorkloadConfig, GemmWorkloadConfig
+from wafersim.config import MemoryCopyWorkloadConfig
 from wafersim.config import MeshConfig, SimulationConfig
 from wafersim.config import StencilWorkloadConfig
 from wafersim.network import PacketRecord, WaferMesh
-from wafersim.workloads import GemmWorkload, MemoryCopyWorkload, StencilWorkload
+from wafersim.workloads import CslDemoWorkload, GemmWorkload, MemoryCopyWorkload
+from wafersim.workloads import StencilWorkload
 
 
 def run_simulation(config: SimulationConfig) -> dict[str, Any]:
@@ -47,7 +49,9 @@ def load_config(path: Path) -> SimulationConfig:
     workload_data = data.get("workload", {})
     workload_type = normalize_workload_type(workload_data.get("type", "stencil"))
     workload_data = {**workload_data, "type": workload_type}
-    if workload_type == "gemm":
+    if workload_type == "csl_demo":
+        workload = CslDemoWorkloadConfig(**workload_data)
+    elif workload_type == "gemm":
         workload = GemmWorkloadConfig(**workload_data)
     elif workload_type in {"memory_copy", "array_stream"}:
         workload_data["type"] = "memory_copy"
@@ -67,8 +71,15 @@ def normalize_workload_type(workload_type: str) -> str:
 
 
 def make_workload(
-    config: StencilWorkloadConfig | MemoryCopyWorkloadConfig | GemmWorkloadConfig,
-) -> StencilWorkload | MemoryCopyWorkload | GemmWorkload:
+    config: (
+        StencilWorkloadConfig
+        | MemoryCopyWorkloadConfig
+        | GemmWorkloadConfig
+        | CslDemoWorkloadConfig
+    ),
+) -> StencilWorkload | MemoryCopyWorkload | GemmWorkload | CslDemoWorkload:
+    if isinstance(config, CslDemoWorkloadConfig):
+        return CslDemoWorkload(config)
     if isinstance(config, GemmWorkloadConfig):
         return GemmWorkload(config)
     if isinstance(config, MemoryCopyWorkloadConfig):
