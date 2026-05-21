@@ -280,6 +280,95 @@ class CslDemoWorkloadConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class SdkExamplesWorkloadConfig:
+    type: str = "sdk_examples"
+    active_rows: int = 4
+    active_cols: int = 4
+    bytes_per_element: int = 4
+    packet_payload_bytes: int = 256
+    fifo_capacity: int = 8
+    stream_bytes: int = 4096
+    tile_rows: int = 16
+    tile_cols: int = 16
+    vector_length: int = 256
+    matrix_rows: int = 256
+    matrix_cols: int = 256
+    gemm_m: int = 128
+    gemm_n: int = 128
+    gemm_k: int = 128
+    iterations: int = 4
+    stencil_halo_bytes_per_direction: int = 128
+    spmv_nonzeros_per_row: int = 7
+    fft_points: int = 256
+
+    def validate(self) -> None:
+        if self.active_rows <= 0 or self.active_cols <= 0:
+            raise ValueError("active rows and cols must be positive")
+        if self.bytes_per_element <= 0:
+            raise ValueError("bytes per element must be positive")
+        if self.packet_payload_bytes <= 0:
+            raise ValueError("packet payload bytes must be positive")
+        if self.fifo_capacity <= 0:
+            raise ValueError("FIFO capacity must be positive")
+        if self.stream_bytes <= 0:
+            raise ValueError("stream bytes must be positive")
+        if self.tile_rows <= 0 or self.tile_cols <= 0:
+            raise ValueError("tile dimensions must be positive")
+        if self.vector_length <= 0:
+            raise ValueError("vector length must be positive")
+        if self.matrix_rows <= 0 or self.matrix_cols <= 0:
+            raise ValueError("matrix dimensions must be positive")
+        if self.gemm_m <= 0 or self.gemm_n <= 0 or self.gemm_k <= 0:
+            raise ValueError("GEMM dimensions must be positive")
+        if self.iterations <= 0:
+            raise ValueError("iterations must be positive")
+        if self.stencil_halo_bytes_per_direction < 0:
+            raise ValueError("stencil halo bytes cannot be negative")
+        if self.spmv_nonzeros_per_row <= 0:
+            raise ValueError("SpMV nonzeros per row must be positive")
+        if self.fft_points <= 0:
+            raise ValueError("FFT points must be positive")
+
+    @property
+    def active_pes(self) -> int:
+        return self.active_rows * self.active_cols
+
+    @property
+    def tile_bytes_per_pe(self) -> int:
+        return self.tile_rows * self.tile_cols * self.bytes_per_element
+
+    @property
+    def vector_bytes(self) -> int:
+        return self.vector_length * self.bytes_per_element
+
+    @property
+    def memory_footprint_bytes_per_pe(self) -> int:
+        fifo_bytes = self.fifo_capacity * self.packet_payload_bytes
+        scratch_bytes = max(self.tile_bytes_per_pe, self.vector_bytes)
+        return scratch_bytes + fifo_bytes + self.packet_payload_bytes
+
+    @property
+    def gemv_ops(self) -> int:
+        return 2 * self.matrix_rows * self.matrix_cols
+
+    @property
+    def gemm_ops(self) -> int:
+        return 2 * self.gemm_m * self.gemm_n * self.gemm_k
+
+    @property
+    def spmv_ops_per_iteration(self) -> int:
+        return 2 * self.matrix_rows * self.spmv_nonzeros_per_row
+
+    @property
+    def stencil_ops_per_pe(self) -> int:
+        return self.tile_rows * self.tile_cols * 25
+
+    @property
+    def game_of_life_ops_per_pe(self) -> int:
+        return self.tile_rows * self.tile_cols * 8
+
+
+@dataclass(frozen=True, slots=True)
 class SimulationConfig:
     mesh: MeshConfig = MeshConfig()
     workload: (
@@ -287,6 +376,7 @@ class SimulationConfig:
         | MemoryCopyWorkloadConfig
         | GemmWorkloadConfig
         | CslDemoWorkloadConfig
+        | SdkExamplesWorkloadConfig
     ) = StencilWorkloadConfig()
 
     def validate(self) -> None:

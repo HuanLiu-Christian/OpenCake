@@ -7,6 +7,7 @@ from pathlib import Path
 
 from wafersim.config import CslDemoWorkloadConfig, GemmWorkloadConfig
 from wafersim.config import MemoryCopyWorkloadConfig
+from wafersim.config import SdkExamplesWorkloadConfig
 from wafersim.config import SimulationConfig
 from wafersim.config import StencilWorkloadConfig
 from wafersim.simulator import load_config, run_simulation, strip_internal_records
@@ -20,7 +21,14 @@ def main() -> None:
     parser.add_argument("--config", type=Path, help="JSON config file")
     parser.add_argument(
         "--workload",
-        choices=["stencil", "memory-copy", "array-stream", "gemm", "csl-demo"],
+        choices=[
+            "stencil",
+            "memory-copy",
+            "array-stream",
+            "gemm",
+            "csl-demo",
+            "sdk-examples",
+        ],
         help="workload type to run",
     )
     parser.add_argument("--rows", type=int, help="mesh rows")
@@ -139,6 +147,17 @@ def main() -> None:
         help="CSL demo color swap payload bytes",
     )
     parser.add_argument("--sentinel-bytes", type=int, help="CSL demo sentinel bytes")
+    parser.add_argument("--stream-bytes", type=int, help="SDK examples stream bytes")
+    parser.add_argument("--vector-length", type=int, help="SDK examples vector length")
+    parser.add_argument("--matrix-rows", type=int, help="SDK examples matrix rows")
+    parser.add_argument("--matrix-cols", type=int, help="SDK examples matrix columns")
+    parser.add_argument("--iterations", type=int, help="SDK examples iteration count")
+    parser.add_argument(
+        "--spmv-nonzeros-per-row",
+        type=int,
+        help="SDK examples SpMV nonzeros per row",
+    )
+    parser.add_argument("--fft-points", type=int, help="SDK examples FFT points")
     parser.add_argument(
         "--trace-jsonl",
         type=Path,
@@ -184,6 +203,7 @@ def select_workload_config(
         | MemoryCopyWorkloadConfig
         | GemmWorkloadConfig
         | CslDemoWorkloadConfig
+        | SdkExamplesWorkloadConfig
     ),
     workload_type: str | None,
 ) -> (
@@ -191,9 +211,16 @@ def select_workload_config(
     | MemoryCopyWorkloadConfig
     | GemmWorkloadConfig
     | CslDemoWorkloadConfig
+    | SdkExamplesWorkloadConfig
 ):
     if workload_type is None:
         return workload
+    if workload_type == "sdk-examples":
+        return (
+            workload
+            if isinstance(workload, SdkExamplesWorkloadConfig)
+            else SdkExamplesWorkloadConfig()
+        )
     if workload_type == "csl-demo":
         return (
             workload if isinstance(workload, CslDemoWorkloadConfig) else CslDemoWorkloadConfig()
@@ -215,6 +242,7 @@ def apply_workload_overrides(
         | MemoryCopyWorkloadConfig
         | GemmWorkloadConfig
         | CslDemoWorkloadConfig
+        | SdkExamplesWorkloadConfig
     ),
     args: argparse.Namespace,
 ) -> (
@@ -222,8 +250,30 @@ def apply_workload_overrides(
     | MemoryCopyWorkloadConfig
     | GemmWorkloadConfig
     | CslDemoWorkloadConfig
+    | SdkExamplesWorkloadConfig
 ):
-    if isinstance(workload, CslDemoWorkloadConfig):
+    if isinstance(workload, SdkExamplesWorkloadConfig):
+        updates = {
+            "active_rows": args.active_rows,
+            "active_cols": args.active_cols,
+            "bytes_per_element": args.bytes_per_element,
+            "packet_payload_bytes": args.packet_payload_bytes,
+            "fifo_capacity": args.fifo_capacity,
+            "stream_bytes": args.stream_bytes,
+            "tile_rows": args.tile_rows,
+            "tile_cols": args.tile_cols,
+            "vector_length": args.vector_length,
+            "matrix_rows": args.matrix_rows,
+            "matrix_cols": args.matrix_cols,
+            "gemm_m": args.gemm_m,
+            "gemm_n": args.gemm_n,
+            "gemm_k": args.gemm_k,
+            "iterations": args.iterations,
+            "stencil_halo_bytes_per_direction": args.halo_bytes,
+            "spmv_nonzeros_per_row": args.spmv_nonzeros_per_row,
+            "fft_points": args.fft_points,
+        }
+    elif isinstance(workload, CslDemoWorkloadConfig):
         updates = {
             "active_rows": args.active_rows,
             "active_cols": args.active_cols,

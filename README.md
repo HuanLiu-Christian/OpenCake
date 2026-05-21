@@ -41,6 +41,12 @@ Run the CSL-topic concept demo:
 python -m wafersim.cli --config configs/csl_topics.json
 ```
 
+Run the later SDK examples concept demo:
+
+```bash
+python -m wafersim.cli --config configs/sdk_examples.json
+```
+
 Run tests:
 
 ```bash
@@ -88,6 +94,22 @@ These are simulator abstractions, not compiled CSL programs. They are useful for
 studying data movement, memory pressure, FIFO backpressure, and PE activity
 before deciding whether to target CSL, Chisel RTL, or another hardware path.
 
+## SDK Example Coverage
+
+`configs/sdk_examples.json` runs concept-level models for later Cerebras SDK
+examples:
+
+- pipeline redirect, H2D FIFO, and artificial halo
+- SDK layout routing, ports, and H2D/D2H streaming
+- GEMV, checkerboard GEMV, collective GEMV, and collective GEMM
+- residual, Cholesky, 25-point stencil, bandwidth test, and 3D 7-point SpMV
+- power method, CG, PCG, BiCGSTAB, and single-tile matvec
+- host-to-device broadcast, 3D FFT, and Conway's Game of Life
+
+These examples are implemented with Python and SimPy only. Cerebras SDK
+libraries such as `<memcpy>` or `<collectives_2d>` are represented by simulator
+events instead of being imported or compiled.
+
 ## Current Outputs
 
 The CLI prints:
@@ -112,6 +134,7 @@ configs/
   memory_copy.json
   gemm.json
   csl_topics.json
+  sdk_examples.json
   medium_stencil.json
 docs/
   hardware_mapping.md

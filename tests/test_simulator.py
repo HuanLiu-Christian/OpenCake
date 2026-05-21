@@ -6,6 +6,7 @@ import simpy
 
 from wafersim.config import CslDemoWorkloadConfig, MemoryCopyWorkloadConfig
 from wafersim.config import MeshConfig, SimulationConfig
+from wafersim.config import SdkExamplesWorkloadConfig
 from wafersim.config import StencilWorkloadConfig
 from wafersim.network import WaferMesh, percentile
 from wafersim.simulator import run_simulation, strip_internal_records
@@ -125,6 +126,39 @@ class SimulatorTests(unittest.TestCase):
         self.assertIn("topic_9_fifo_items", topic_results)
         self.assertIn("topic_11_collective_packets", topic_results)
         self.assertIn("topic_15_microthread_tasks", topic_results)
+
+    def test_sdk_examples_runs_later_example_models(self) -> None:
+        summary = run_simulation(
+            SimulationConfig(
+                mesh=MeshConfig(rows=4, cols=4),
+                workload=SdkExamplesWorkloadConfig(
+                    active_rows=2,
+                    active_cols=2,
+                    stream_bytes=128,
+                    packet_payload_bytes=32,
+                    matrix_rows=32,
+                    matrix_cols=32,
+                    gemm_m=32,
+                    gemm_n=32,
+                    gemm_k=32,
+                    vector_length=32,
+                    tile_rows=4,
+                    tile_cols=4,
+                    iterations=2,
+                    fft_points=32,
+                ),
+            )
+        )
+        public_summary = strip_internal_records(summary)
+        example_results = public_summary["workload"]["example_results"]
+
+        self.assertEqual(public_summary["workload"]["type"], "sdk_examples")
+        self.assertGreater(public_summary["packets"], 0)
+        self.assertIn("pipeline_1_redirect_packets", example_results)
+        self.assertIn("gemv_collective_ops", example_results)
+        self.assertIn("gemm_collective_ops", example_results)
+        self.assertIn("game_of_life_ops", example_results)
+        self.assertGreater(public_summary["sdk_examples_total_ops"], 0)
 
 
 if __name__ == "__main__":

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import math
+
 import simpy
 
 from wafersim.config import CslDemoWorkloadConfig, Coord, GemmWorkloadConfig
 from wafersim.config import MemoryCopyWorkloadConfig
+from wafersim.config import SdkExamplesWorkloadConfig
 from wafersim.config import StencilWorkloadConfig
 from wafersim.network import WaferMesh
 
@@ -684,3 +687,592 @@ class CslDemoWorkload:
         if events:
             yield simpy.events.AllOf(env, events)
         self.topic_results["topic_16_reused_output_queue_packets"] = len(events)
+
+
+class SdkExamplesWorkload:
+    """Concept-level models for later Cerebras SDK code examples.
+
+    The official examples use CSL, SdkRuntime, fabric DSDs, colors, and SDK
+    libraries. This workload keeps the architectural behavior: streams, FIFOs,
+    ports, collectives, stencils, sparse matvecs, iterative solvers, FFT-style
+    transposes, and cellular automata.
+    """
+
+    def __init__(self, config: SdkExamplesWorkloadConfig) -> None:
+        config.validate()
+        self.config = config
+        self.example_results: dict[str, int | float | list[int]] = {}
+
+    def run(self, env: simpy.Environment, mesh: WaferMesh):
+        self._validate_mesh_shape(mesh)
+        coords = self._active_coords()
+        for coord in coords:
+            mesh.pes[coord].reserve_memory(self.config.memory_footprint_bytes_per_pe)
+
+        yield from self._pipeline_redirect(env, mesh, coords)
+        yield from self._pipeline_h2d_fifo(env, mesh, coords)
+        yield from self._pipeline_artificial_halo(env, mesh, coords)
+        yield from self._sdklayout_intro(env, mesh, coords)
+        yield from self._sdklayout_basic_routing(env, mesh, coords)
+        yield from self._sdklayout_ports(env, mesh, coords)
+        yield from self._sdklayout_h2d_d2h(env, mesh, coords)
+        yield from self._gemv(env, mesh, coords)
+        yield from self._gemv_checkerboard(env, mesh, coords)
+        yield from self._gemv_collective(env, mesh, coords)
+        yield from self._gemm_collective(env, mesh, coords)
+        yield from self._residual(env, mesh, coords)
+        yield from self._cholesky(env, mesh, coords)
+        yield from self._stencil_25_point(env, mesh, coords)
+        yield from self._bandwidth_test(env, mesh, coords)
+        yield from self._stencil_3d_7_point_spmv(env, mesh, coords)
+        yield from self._power_method(env, mesh, coords)
+        yield from self._conjugate_gradient(env, mesh, coords)
+        yield from self._preconditioned_conjugate_gradient(env, mesh, coords)
+        yield from self._bicgstab(env, mesh, coords)
+        yield from self._single_tile_matvec(env, mesh, coords)
+        yield from self._host_to_device_broadcast(env, mesh, coords)
+        yield from self._fft_3d(env, mesh, coords)
+        yield from self._game_of_life(env, mesh, coords)
+
+    def summary(
+        self, mesh: WaferMesh
+    ) -> dict[str, int | float | str | dict[str, int | float | list[int]]]:
+        return {
+            "type": "sdk_examples",
+            "active_rows": self.config.active_rows,
+            "active_cols": self.config.active_cols,
+            "active_pes": self.config.active_pes,
+            "bytes_per_element": self.config.bytes_per_element,
+            "packet_payload_bytes": self.config.packet_payload_bytes,
+            "fifo_capacity": self.config.fifo_capacity,
+            "stream_bytes": self.config.stream_bytes,
+            "tile_rows": self.config.tile_rows,
+            "tile_cols": self.config.tile_cols,
+            "vector_length": self.config.vector_length,
+            "matrix_rows": self.config.matrix_rows,
+            "matrix_cols": self.config.matrix_cols,
+            "gemm_m": self.config.gemm_m,
+            "gemm_n": self.config.gemm_n,
+            "gemm_k": self.config.gemm_k,
+            "iterations": self.config.iterations,
+            "stencil_halo_bytes_per_direction": (
+                self.config.stencil_halo_bytes_per_direction
+            ),
+            "spmv_nonzeros_per_row": self.config.spmv_nonzeros_per_row,
+            "fft_points": self.config.fft_points,
+            "memory_footprint_bytes_per_pe": (
+                self.config.memory_footprint_bytes_per_pe
+            ),
+            "example_results": self.example_results,
+        }
+
+    def result_summary(
+        self, mesh: WaferMesh, elapsed_cycles: float
+    ) -> dict[str, float | int]:
+        total_ops = sum(
+            value
+            for key, value in self.example_results.items()
+            if key.endswith("_ops") and isinstance(value, int | float)
+        )
+        total_stream_bytes = sum(
+            value
+            for key, value in self.example_results.items()
+            if key.endswith("_bytes") and isinstance(value, int | float)
+        )
+        peak = (
+            self.config.active_pes * mesh.config.compute_throughput_ops_per_cycle
+        )
+        return {
+            "sdk_examples_total_ops": total_ops,
+            "sdk_examples_ops_per_cycle": (
+                total_ops / elapsed_cycles if elapsed_cycles > 0 else 0.0
+            ),
+            "sdk_examples_compute_efficiency": (
+                (total_ops / elapsed_cycles) / peak
+                if elapsed_cycles > 0 and peak > 0
+                else 0.0
+            ),
+            "sdk_examples_stream_bytes": total_stream_bytes,
+            "sdk_examples_stream_bytes_per_cycle": (
+                total_stream_bytes / elapsed_cycles if elapsed_cycles > 0 else 0.0
+            ),
+        }
+
+    def _validate_mesh_shape(self, mesh: WaferMesh) -> None:
+        if self.config.active_rows > mesh.config.rows:
+            raise ValueError("SDK examples active rows exceed mesh rows")
+        if self.config.active_cols > mesh.config.cols:
+            raise ValueError("SDK examples active cols exceed mesh cols")
+
+    def _active_coords(self) -> list[Coord]:
+        return [
+            (row, col)
+            for row in range(self.config.active_rows)
+            for col in range(self.config.active_cols)
+        ]
+
+    def _packet_chunks(self, total_bytes: int) -> list[int]:
+        chunks = []
+        remaining = total_bytes
+        while remaining > 0:
+            chunk = min(self.config.packet_payload_bytes, remaining)
+            chunks.append(chunk)
+            remaining -= chunk
+        return chunks
+
+    def _send_stream(
+        self,
+        env: simpy.Environment,
+        mesh: WaferMesh,
+        src: Coord,
+        dst: Coord,
+        total_bytes: int,
+        kind: str,
+    ):
+        events = [
+            env.process(mesh.send(src=src, dst=dst, size_bytes=chunk, kind=kind))
+            for chunk in self._packet_chunks(total_bytes)
+        ]
+        if events:
+            yield simpy.events.AllOf(env, events)
+        return len(events)
+
+    def _compute_all(
+        self,
+        env: simpy.Environment,
+        mesh: WaferMesh,
+        coords: list[Coord],
+        ops_per_pe: int,
+    ):
+        events = [env.process(mesh.pes[coord].compute(ops_per_pe)) for coord in coords]
+        if events:
+            yield simpy.events.AllOf(env, events)
+
+    def _memory_all(
+        self,
+        env: simpy.Environment,
+        mesh: WaferMesh,
+        coords: list[Coord],
+        bytes_per_pe: int,
+    ):
+        events = [
+            env.process(mesh.pes[coord].access_memory(bytes_per_pe)) for coord in coords
+        ]
+        if events:
+            yield simpy.events.AllOf(env, events)
+
+    def _pipeline_redirect(
+        self, env: simpy.Environment, mesh: WaferMesh, coords: list[Coord]
+    ):
+        packets = yield from self._send_stream(
+            env, mesh, coords[0], coords[-1], self.config.stream_bytes, "sdk:pipeline1"
+        )
+        self.example_results["pipeline_1_redirect_packets"] = packets
+        self.example_results["pipeline_1_redirect_bytes"] = self.config.stream_bytes
+
+    def _pipeline_h2d_fifo(
+        self, env: simpy.Environment, mesh: WaferMesh, coords: list[Coord]
+    ):
+        fifo = simpy.Store(env, capacity=self.config.fifo_capacity)
+        chunks = self._packet_chunks(self.config.stream_bytes)
+        producer = env.process(self._fifo_stream_producer(env, fifo, chunks))
+        consumer = env.process(self._fifo_stream_consumer(env, fifo, mesh, coords[0]))
+        yield simpy.events.AllOf(env, [producer, consumer])
+        self.example_results["pipeline_2_h2d_fifo_items"] = len(chunks)
+        self.example_results["pipeline_2_h2d_fifo_bytes"] = self.config.stream_bytes
+
+    def _fifo_stream_producer(
+        self, env: simpy.Environment, fifo: simpy.Store, chunks: list[int]
+    ):
+        for chunk in chunks:
+            yield fifo.put(chunk)
+            yield env.timeout(1)
+
+    def _fifo_stream_consumer(
+        self, env: simpy.Environment, fifo: simpy.Store, mesh: WaferMesh, coord: Coord
+    ):
+        for _ in range(len(self._packet_chunks(self.config.stream_bytes))):
+            chunk = yield fifo.get()
+            yield from mesh.pes[coord].access_memory(chunk)
+
+    def _pipeline_artificial_halo(
+        self, env: simpy.Environment, mesh: WaferMesh, coords: list[Coord]
+    ):
+        events = []
+        for coord in coords:
+            for neighbor in mesh.neighbors(coord):
+                if neighbor in coords:
+                    events.append(
+                        env.process(
+                            mesh.send(
+                                src=coord,
+                                dst=neighbor,
+                                size_bytes=self.config.stencil_halo_bytes_per_direction,
+                                kind="sdk:pipeline3:artificial_halo",
+                            )
+                        )
+                    )
+        if events:
+            yield simpy.events.AllOf(env, events)
+        self.example_results["pipeline_3_artificial_halo_packets"] = len(events)
+
+    def _sdklayout_intro(
+        self, env: simpy.Environment, mesh: WaferMesh, coords: list[Coord]
+    ):
+        yield env.timeout(0)
+        self.example_results["sdklayout_1_active_pes"] = len(coords)
+
+    def _sdklayout_basic_routing(
+        self, env: simpy.Environment, mesh: WaferMesh, coords: list[Coord]
+    ):
+        route = mesh.route_xy(coords[0], coords[-1])
+        packets = yield from self._send_stream(
+            env,
+            mesh,
+            coords[0],
+            coords[-1],
+            self.config.packet_payload_bytes,
+            "sdk:layout2:basic_routing",
+        )
+        self.example_results["sdklayout_2_route_hops"] = len(route)
+        self.example_results["sdklayout_2_packets"] = packets
+
+    def _sdklayout_ports(
+        self, env: simpy.Environment, mesh: WaferMesh, coords: list[Coord]
+    ):
+        west_port, east_port = (0, 0), (0, self.config.active_cols - 1)
+        packets = yield from self._send_stream(
+            env,
+            mesh,
+            west_port,
+            east_port,
+            self.config.stream_bytes // 2,
+            "sdk:layout3:ports",
+        )
+        self.example_results["sdklayout_3_port_packets"] = packets
+
+    def _sdklayout_h2d_d2h(
+        self, env: simpy.Environment, mesh: WaferMesh, coords: list[Coord]
+    ):
+        h2d = yield from self._send_stream(
+            env, mesh, coords[0], coords[-1], self.config.stream_bytes, "sdk:layout4:h2d"
+        )
+        d2h = yield from self._send_stream(
+            env, mesh, coords[-1], coords[0], self.config.stream_bytes, "sdk:layout4:d2h"
+        )
+        self.example_results["sdklayout_4_stream_packets"] = h2d + d2h
+        self.example_results["sdklayout_4_stream_bytes"] = self.config.stream_bytes * 2
+
+    def _gemv(self, env: simpy.Environment, mesh: WaferMesh, coords: list[Coord]):
+        ops_per_pe = max(1, self.config.gemv_ops // len(coords))
+        yield from self._memory_all(env, mesh, coords, self.config.vector_bytes)
+        yield from self._compute_all(env, mesh, coords, ops_per_pe)
+        self.example_results["sdklayout_5_gemv_ops"] = self.config.gemv_ops
+
+    def _gemv_checkerboard(
+        self, env: simpy.Environment, mesh: WaferMesh, coords: list[Coord]
+    ):
+        active = [coord for coord in coords if (coord[0] + coord[1]) % 2 == 0]
+        ops_per_pe = max(1, self.config.gemv_ops // max(1, len(active)))
+        yield from self._compute_all(env, mesh, active, ops_per_pe)
+        self.example_results["gemv_checkerboard_active_pes"] = len(active)
+        self.example_results["gemv_checkerboard_ops"] = self.config.gemv_ops
+
+    def _gemv_collective(
+        self, env: simpy.Environment, mesh: WaferMesh, coords: list[Coord]
+    ):
+        packets = yield from self._broadcast_and_reduce(
+            env, mesh, coords, self.config.vector_bytes, "sdk:gemv_collective"
+        )
+        ops_per_pe = max(1, self.config.gemv_ops // len(coords))
+        yield from self._compute_all(env, mesh, coords, ops_per_pe)
+        self.example_results["gemv_collective_packets"] = packets
+        self.example_results["gemv_collective_ops"] = self.config.gemv_ops
+
+    def _gemm_collective(
+        self, env: simpy.Environment, mesh: WaferMesh, coords: list[Coord]
+    ):
+        tile_bytes = self.config.tile_bytes_per_pe
+        packets = yield from self._broadcast_and_reduce(
+            env, mesh, coords, tile_bytes, "sdk:gemm_collective"
+        )
+        ops_per_pe = max(1, self.config.gemm_ops // len(coords))
+        yield from self._compute_all(env, mesh, coords, ops_per_pe)
+        self.example_results["gemm_collective_packets"] = packets
+        self.example_results["gemm_collective_ops"] = self.config.gemm_ops
+
+    def _residual(self, env: simpy.Environment, mesh: WaferMesh, coords: list[Coord]):
+        ops = self.config.spmv_ops_per_iteration + self.config.matrix_rows
+        yield from self._compute_all(env, mesh, coords, max(1, ops // len(coords)))
+        self.example_results["residual_ops"] = ops
+
+    def _cholesky(self, env: simpy.Environment, mesh: WaferMesh, coords: list[Coord]):
+        n = min(self.config.matrix_rows, self.config.matrix_cols)
+        ops = max(1, n * n * n // 3)
+        panel_steps = min(self.config.active_rows, self.config.active_cols)
+        for step in range(panel_steps):
+            panel = coords[step]
+            trailing = coords[step + 1 :]
+            packets = [
+                env.process(
+                    mesh.send(
+                        src=panel,
+                        dst=coord,
+                        size_bytes=self.config.packet_payload_bytes,
+                        kind=f"sdk:cholesky:panel:{step}",
+                    )
+                )
+                for coord in trailing
+            ]
+            if packets:
+                yield simpy.events.AllOf(env, packets)
+        yield from self._compute_all(env, mesh, coords, max(1, ops // len(coords)))
+        self.example_results["cholesky_ops"] = ops
+
+    def _stencil_25_point(
+        self, env: simpy.Environment, mesh: WaferMesh, coords: list[Coord]
+    ):
+        packets = yield from self._neighbor_exchange(
+            env, mesh, coords, self.config.stencil_halo_bytes_per_direction, "sdk:25pt"
+        )
+        ops = self.config.stencil_ops_per_pe * len(coords)
+        yield from self._compute_all(env, mesh, coords, self.config.stencil_ops_per_pe)
+        self.example_results["stencil_25_point_packets"] = packets
+        self.example_results["stencil_25_point_ops"] = ops
+
+    def _bandwidth_test(
+        self, env: simpy.Environment, mesh: WaferMesh, coords: list[Coord]
+    ):
+        packets = yield from self._send_stream(
+            env, mesh, coords[0], coords[-1], self.config.stream_bytes * 2, "sdk:bandwidth"
+        )
+        self.example_results["bandwidth_test_packets"] = packets
+        self.example_results["bandwidth_test_bytes"] = self.config.stream_bytes * 2
+
+    def _stencil_3d_7_point_spmv(
+        self, env: simpy.Environment, mesh: WaferMesh, coords: list[Coord]
+    ):
+        packets = yield from self._neighbor_exchange(
+            env, mesh, coords, self.config.packet_payload_bytes, "sdk:3d7pt_spmv"
+        )
+        ops = self.config.spmv_ops_per_iteration
+        yield from self._compute_all(env, mesh, coords, max(1, ops // len(coords)))
+        self.example_results["stencil_3d_7_point_spmv_packets"] = packets
+        self.example_results["stencil_3d_7_point_spmv_ops"] = ops
+
+    def _power_method(
+        self, env: simpy.Environment, mesh: WaferMesh, coords: list[Coord]
+    ):
+        ops = self.config.iterations * (
+            self.config.spmv_ops_per_iteration + 2 * self.config.matrix_rows
+        )
+        packets = 0
+        for iteration in range(self.config.iterations):
+            packets += yield from self._broadcast_and_reduce(
+                env,
+                mesh,
+                coords,
+                self.config.packet_payload_bytes,
+                f"sdk:power_method:{iteration}",
+            )
+        yield from self._compute_all(env, mesh, coords, max(1, ops // len(coords)))
+        self.example_results["power_method_packets"] = packets
+        self.example_results["power_method_ops"] = ops
+
+    def _conjugate_gradient(
+        self, env: simpy.Environment, mesh: WaferMesh, coords: list[Coord]
+    ):
+        ops = self.config.iterations * (
+            self.config.spmv_ops_per_iteration + 6 * self.config.matrix_rows
+        )
+        packets = yield from self._iterative_solver_collectives(
+            env, mesh, coords, "sdk:cg", reductions_per_iteration=2
+        )
+        yield from self._compute_all(env, mesh, coords, max(1, ops // len(coords)))
+        self.example_results["conjugate_gradient_packets"] = packets
+        self.example_results["conjugate_gradient_ops"] = ops
+
+    def _preconditioned_conjugate_gradient(
+        self, env: simpy.Environment, mesh: WaferMesh, coords: list[Coord]
+    ):
+        ops = self.config.iterations * (
+            self.config.spmv_ops_per_iteration + 8 * self.config.matrix_rows
+        )
+        packets = yield from self._iterative_solver_collectives(
+            env, mesh, coords, "sdk:pcg", reductions_per_iteration=2
+        )
+        yield from self._compute_all(env, mesh, coords, max(1, ops // len(coords)))
+        self.example_results["preconditioned_conjugate_gradient_packets"] = packets
+        self.example_results["preconditioned_conjugate_gradient_ops"] = ops
+
+    def _bicgstab(self, env: simpy.Environment, mesh: WaferMesh, coords: list[Coord]):
+        ops = self.config.iterations * (
+            2 * self.config.spmv_ops_per_iteration + 10 * self.config.matrix_rows
+        )
+        packets = yield from self._iterative_solver_collectives(
+            env, mesh, coords, "sdk:bicgstab", reductions_per_iteration=4
+        )
+        yield from self._compute_all(env, mesh, coords, max(1, ops // len(coords)))
+        self.example_results["bicgstab_packets"] = packets
+        self.example_results["bicgstab_ops"] = ops
+
+    def _single_tile_matvec(
+        self, env: simpy.Environment, mesh: WaferMesh, coords: list[Coord]
+    ):
+        ops = 2 * self.config.tile_rows * self.config.tile_cols
+        yield from mesh.pes[coords[0]].compute(ops)
+        self.example_results["single_tile_matvec_ops"] = ops
+
+    def _host_to_device_broadcast(
+        self, env: simpy.Environment, mesh: WaferMesh, coords: list[Coord]
+    ):
+        packets = yield from self._broadcast(
+            env, mesh, coords, self.config.packet_payload_bytes, "sdk:h2d_broadcast"
+        )
+        self.example_results["host_to_device_broadcast_packets"] = packets
+        self.example_results["host_to_device_broadcast_bytes"] = (
+            self.config.packet_payload_bytes * max(0, len(coords) - 1)
+        )
+
+    def _fft_3d(self, env: simpy.Environment, mesh: WaferMesh, coords: list[Coord]):
+        log_points = max(1, math.ceil(math.log2(self.config.fft_points)))
+        ops = 5 * self.config.fft_points * log_points
+        transpose_bytes = self.config.fft_points * self.config.bytes_per_element
+        packets = yield from self._all_to_all(
+            env, mesh, coords[: min(4, len(coords))], transpose_bytes, "sdk:3d_fft"
+        )
+        yield from self._compute_all(env, mesh, coords, max(1, ops // len(coords)))
+        self.example_results["fft_3d_packets"] = packets
+        self.example_results["fft_3d_ops"] = ops
+
+    def _game_of_life(
+        self, env: simpy.Environment, mesh: WaferMesh, coords: list[Coord]
+    ):
+        packets = 0
+        ops = 0
+        for step in range(self.config.iterations):
+            packets += yield from self._neighbor_exchange(
+                env,
+                mesh,
+                coords,
+                self.config.packet_payload_bytes,
+                f"sdk:game_of_life:{step}",
+            )
+            step_ops = self.config.game_of_life_ops_per_pe * len(coords)
+            ops += step_ops
+            yield from self._compute_all(
+                env, mesh, coords, self.config.game_of_life_ops_per_pe
+            )
+        self.example_results["game_of_life_packets"] = packets
+        self.example_results["game_of_life_ops"] = ops
+
+    def _broadcast(
+        self,
+        env: simpy.Environment,
+        mesh: WaferMesh,
+        coords: list[Coord],
+        bytes_per_message: int,
+        kind: str,
+    ):
+        root = coords[0]
+        events = [
+            env.process(mesh.send(src=root, dst=coord, size_bytes=bytes_per_message, kind=kind))
+            for coord in coords
+            if coord != root
+        ]
+        if events:
+            yield simpy.events.AllOf(env, events)
+        return len(events)
+
+    def _broadcast_and_reduce(
+        self,
+        env: simpy.Environment,
+        mesh: WaferMesh,
+        coords: list[Coord],
+        bytes_per_message: int,
+        kind: str,
+    ):
+        root = coords[0]
+        events = [
+            env.process(
+                mesh.send(src=root, dst=coord, size_bytes=bytes_per_message, kind=f"{kind}:bcast")
+            )
+            for coord in coords
+            if coord != root
+        ]
+        events.extend(
+            env.process(
+                mesh.send(src=coord, dst=root, size_bytes=bytes_per_message, kind=f"{kind}:reduce")
+            )
+            for coord in coords
+            if coord != root
+        )
+        if events:
+            yield simpy.events.AllOf(env, events)
+        return len(events)
+
+    def _neighbor_exchange(
+        self,
+        env: simpy.Environment,
+        mesh: WaferMesh,
+        coords: list[Coord],
+        bytes_per_message: int,
+        kind: str,
+    ):
+        coord_set = set(coords)
+        events = []
+        for coord in coords:
+            for neighbor in mesh.neighbors(coord):
+                if neighbor in coord_set:
+                    events.append(
+                        env.process(
+                            mesh.send(
+                                src=coord,
+                                dst=neighbor,
+                                size_bytes=bytes_per_message,
+                                kind=kind,
+                            )
+                        )
+                    )
+        if events:
+            yield simpy.events.AllOf(env, events)
+        return len(events)
+
+    def _iterative_solver_collectives(
+        self,
+        env: simpy.Environment,
+        mesh: WaferMesh,
+        coords: list[Coord],
+        kind: str,
+        reductions_per_iteration: int,
+    ):
+        packets = 0
+        for iteration in range(self.config.iterations):
+            for reduction in range(reductions_per_iteration):
+                packets += yield from self._broadcast_and_reduce(
+                    env,
+                    mesh,
+                    coords,
+                    self.config.packet_payload_bytes,
+                    f"{kind}:{iteration}:{reduction}",
+                )
+        return packets
+
+    def _all_to_all(
+        self,
+        env: simpy.Environment,
+        mesh: WaferMesh,
+        coords: list[Coord],
+        total_bytes: int,
+        kind: str,
+    ):
+        chunk = max(1, total_bytes // max(1, len(coords)))
+        events = [
+            env.process(mesh.send(src=src, dst=dst, size_bytes=chunk, kind=kind))
+            for src in coords
+            for dst in coords
+            if src != dst
+        ]
+        if events:
+            yield simpy.events.AllOf(env, events)
+        return len(events)
