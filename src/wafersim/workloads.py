@@ -4,10 +4,12 @@ import math
 
 import simpy
 
-from wafersim.config import CslDemoWorkloadConfig, Coord, GemmWorkloadConfig
+from wafersim.config import CslDemoWorkloadConfig, CslRuntimeWorkloadConfig, Coord
+from wafersim.config import GemmWorkloadConfig
 from wafersim.config import MemoryCopyWorkloadConfig
 from wafersim.config import SdkExamplesWorkloadConfig
 from wafersim.config import StencilWorkloadConfig
+from wafersim.csl_compat import CslBuiltins, CslCompatibilityRuntime, Direction
 from wafersim.network import WaferMesh
 
 
@@ -1276,3 +1278,177 @@ class SdkExamplesWorkload:
         if events:
             yield simpy.events.AllOf(env, events)
         return len(events)
+
+
+class CslRuntimeWorkload:
+    """Integrated smoke workload for CSL builtins/library compatibility APIs."""
+
+    def __init__(self, config: CslRuntimeWorkloadConfig) -> None:
+        config.validate()
+        self.config = config
+        self.runtime_summary: dict[str, int | float | list[str]] = {}
+        self.compat_results: dict[str, int | float | list[int] | str] = {}
+
+    def run(self, env: simpy.Environment, mesh: WaferMesh):
+        self._validate_mesh_shape(mesh)
+        region = CslBuiltins.set_rectangle(
+            self.config.active_rows, self.config.active_cols
+        )
+        coords = region.coords()
+        runtime = CslCompatibilityRuntime(
+            env=env,
+            mesh=mesh,
+            region=region,
+            packet_payload_bytes=self.config.packet_payload_bytes,
+        )
+
+        zeros = CslBuiltins.zeros(4)
+        constants = CslBuiltins.constant(4, 7)
+        pointer = CslBuiltins.ptr(constants, 0)
+        pointer.store(pointer.load() + 1)
+        module_name = CslBuiltins.import_module("<math>")
+        mapped_ids = [CslBuiltins.map_builtin(coord, region) for coord in coords]
+        bitcast_value = CslBuiltins.bitcast_int(-1, 8)
+        selected_value = CslBuiltins.select(True, 11, 22)
+        concat_length = len(CslBuiltins.concat([1, 2], [3, 4]))
+        range_sum = sum(CslBuiltins.range_values(4))
+
+        random_values = [
+            runtime.random.random_f32(-1.0, 1.0)
+            for _ in range(self.config.math_calls)
+        ]
+        math_ops = runtime.math.estimate_ops(self.config.math_calls)
+        math_result = sum(
+            runtime.math.sqrt_f32(value * value)
+            + runtime.math.cos_f32(value)
+            + runtime.math.abs_f32(value)
+            for value in random_values
+        )
+        complex_magnitude = runtime.complex.magnitude(
+            runtime.complex.mul(1 + 2j, 3 + 4j)
+        )
+        flattened = runtime.data_utils.flatten([[1, 2], [3, 4]])
+        reshaped = runtime.data_utils.reshape(flattened, 2, 2)
+        chunks = runtime.data_utils.chunk(self.config.memcpy_bytes, self.config.packet_payload_bytes)
+        moved_coord = runtime.directions.move(coords[0], Direction.SOUTH)
+        opposite = runtime.directions.opposite(Direction.SOUTH).value
+        dsd_indices = runtime.dsd_ops.strided(0, 4, 2)
+        dsd_buffer = [0, 10, 20, 30, 40, 50, 60, 70]
+        gathered = runtime.dsd_ops.gather(dsd_buffer, dsd_indices)
+        runtime.dsd_ops.scatter(dsd_buffer, dsd_indices, [1, 2, 3, 4])
+        runtime.empty.noop()
+        string_length = runtime.string.length(runtime.string.concat("cs", "l"))
+        type_size = runtime.types.sizeof("f32")
+        clamped = runtime.types.clamp_to_unsigned(-1, 16)
+        saxpy = runtime.kernels.saxpy(2.0, [1.0, 2.0], [3.0, 4.0])
+        dot = runtime.kernels.dot([1.0, 2.0], [3.0, 4.0])
+        fft_ops = runtime.fft.estimate_ops(8)
+        bit_reverse_sum = sum(runtime.fft.bit_reverse_indices(8))
+        tally = runtime.tally.histogram([0, 1, 1, 2, 5], 4)
+        runtime.control.block_cmd_stream()
+        runtime.control.unblock_cmd_stream()
+        runtime.timer.start("compat")
+        yield env.timeout(0)
+        timer_elapsed = runtime.timer.elapsed("compat")
+        runtime.malloc.malloc(self.config.malloc_bytes)
+        runtime.debug.trace("math_result", coords[0], math_result)
+        runtime.simprint.print(coords[0], "compat runtime started")
+
+        fifo = runtime.tile_config.fifo(self.config.fifo_capacity)
+        for item in range(self.config.fifo_capacity):
+            yield fifo.put(item)
+        for _ in range(self.config.fifo_capacity):
+            yield fifo.get()
+
+        selected = runtime.tile_config.filter_coords(
+            coords, lambda coord: (coord[0] + coord[1]) % 2 == 0
+        )
+        switched = runtime.tile_config.switch_destinations(coords[0], coords)
+
+        yield from runtime.memcpy.h2d(coords[-1], self.config.memcpy_bytes)
+        yield from runtime.memcpy.d2h(coords[-1], self.config.memcpy_bytes)
+        yield from runtime.memcpy.p2p(coords[0], coords[-1], self.config.memcpy_bytes)
+        yield from runtime.collectives.broadcast(coords[0], self.config.collective_bytes)
+        yield from runtime.collectives.reduce(coords[0], self.config.collective_bytes)
+        yield from runtime.collectives.allreduce(coords[0], self.config.collective_bytes)
+        yield from runtime.collectives.scatter(coords[0], self.config.collective_bytes)
+        yield from runtime.collectives.gather(coords[0], self.config.collective_bytes)
+
+        self.runtime_summary = runtime.summary()
+        self.compat_results = {
+            "zeros_length": len(zeros),
+            "constant_first_value_after_pointer_store": constants[0],
+            "imported_module": module_name,
+            "sizeof_bytes": CslBuiltins.sizeof(16, 4),
+            "bitcast_int_8_bits": bitcast_value,
+            "selected_value": selected_value,
+            "concat_length": concat_length,
+            "range_sum": range_sum,
+            "mapped_ids": mapped_ids,
+            "selected_coords": len(selected),
+            "switch_destinations": len(switched),
+            "fifo_items": self.config.fifo_capacity,
+            "math_ops": math_ops,
+            "math_result": math_result,
+            "complex_magnitude": complex_magnitude,
+            "data_utils_chunks": len(chunks),
+            "data_utils_reshaped_rows": len(reshaped),
+            "direction_moved_row": moved_coord[0],
+            "direction_opposite": opposite,
+            "dsd_gather_sum": sum(gathered),
+            "dsd_scatter_first": dsd_buffer[0],
+            "string_length": string_length,
+            "type_size_f32": type_size,
+            "clamped_u16": clamped,
+            "saxpy_sum": sum(saxpy),
+            "dot_result": dot,
+            "fft_ops": fft_ops,
+            "fft_bit_reverse_sum": bit_reverse_sum,
+            "tally_total": sum(tally),
+            "collective_params_size": runtime.collective_params.size,
+            "collective_rank_1_1": runtime.collective_pe.rank(coords[-1]),
+            "timer_elapsed": timer_elapsed,
+        }
+
+    def summary(
+        self, mesh: WaferMesh
+    ) -> dict[str, int | float | str | dict[str, int | float | list[int] | str | list[str]]]:
+        return {
+            "type": "csl_runtime",
+            "active_rows": self.config.active_rows,
+            "active_cols": self.config.active_cols,
+            "active_pes": self.config.active_pes,
+            "packet_payload_bytes": self.config.packet_payload_bytes,
+            "memcpy_bytes": self.config.memcpy_bytes,
+            "collective_bytes": self.config.collective_bytes,
+            "fifo_capacity": self.config.fifo_capacity,
+            "math_calls": self.config.math_calls,
+            "malloc_bytes": self.config.malloc_bytes,
+            "compat_results": self.compat_results,
+            "runtime_summary": self.runtime_summary,
+        }
+
+    def result_summary(
+        self, mesh: WaferMesh, elapsed_cycles: float
+    ) -> dict[str, float | int]:
+        math_ops = self.compat_results.get("math_ops", 0)
+        memcpy_bytes = self.runtime_summary.get("memcpy_bytes", 0)
+        collective_bytes = self.runtime_summary.get("collective_bytes", 0)
+        return {
+            "csl_runtime_ops": math_ops if isinstance(math_ops, int | float) else 0,
+            "csl_runtime_ops_per_cycle": (
+                math_ops / elapsed_cycles
+                if elapsed_cycles > 0 and isinstance(math_ops, int | float)
+                else 0.0
+            ),
+            "csl_runtime_bytes": (
+                (memcpy_bytes if isinstance(memcpy_bytes, int | float) else 0)
+                + (collective_bytes if isinstance(collective_bytes, int | float) else 0)
+            ),
+        }
+
+    def _validate_mesh_shape(self, mesh: WaferMesh) -> None:
+        if self.config.active_rows > mesh.config.rows:
+            raise ValueError("CSL runtime active rows exceed mesh rows")
+        if self.config.active_cols > mesh.config.cols:
+            raise ValueError("CSL runtime active cols exceed mesh cols")

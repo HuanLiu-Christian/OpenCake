@@ -369,6 +369,39 @@ class SdkExamplesWorkloadConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class CslRuntimeWorkloadConfig:
+    type: str = "csl_runtime"
+    active_rows: int = 2
+    active_cols: int = 2
+    packet_payload_bytes: int = 128
+    memcpy_bytes: int = 512
+    collective_bytes: int = 128
+    fifo_capacity: int = 4
+    math_calls: int = 16
+    malloc_bytes: int = 1024
+
+    def validate(self) -> None:
+        if self.active_rows <= 0 or self.active_cols <= 0:
+            raise ValueError("active rows and cols must be positive")
+        if self.packet_payload_bytes <= 0:
+            raise ValueError("packet payload bytes must be positive")
+        if self.memcpy_bytes <= 0:
+            raise ValueError("memcpy bytes must be positive")
+        if self.collective_bytes <= 0:
+            raise ValueError("collective bytes must be positive")
+        if self.fifo_capacity <= 0:
+            raise ValueError("FIFO capacity must be positive")
+        if self.math_calls <= 0:
+            raise ValueError("math calls must be positive")
+        if self.malloc_bytes <= 0:
+            raise ValueError("malloc bytes must be positive")
+
+    @property
+    def active_pes(self) -> int:
+        return self.active_rows * self.active_cols
+
+
+@dataclass(frozen=True, slots=True)
 class SimulationConfig:
     mesh: MeshConfig = MeshConfig()
     workload: (
@@ -377,6 +410,7 @@ class SimulationConfig:
         | GemmWorkloadConfig
         | CslDemoWorkloadConfig
         | SdkExamplesWorkloadConfig
+        | CslRuntimeWorkloadConfig
     ) = StencilWorkloadConfig()
 
     def validate(self) -> None:

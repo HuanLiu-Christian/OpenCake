@@ -5,7 +5,8 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
-from wafersim.config import CslDemoWorkloadConfig, GemmWorkloadConfig
+from wafersim.config import CslDemoWorkloadConfig, CslRuntimeWorkloadConfig
+from wafersim.config import GemmWorkloadConfig
 from wafersim.config import MemoryCopyWorkloadConfig
 from wafersim.config import SdkExamplesWorkloadConfig
 from wafersim.config import SimulationConfig
@@ -27,6 +28,7 @@ def main() -> None:
             "array-stream",
             "gemm",
             "csl-demo",
+            "csl-runtime",
             "sdk-examples",
         ],
         help="workload type to run",
@@ -148,6 +150,13 @@ def main() -> None:
     )
     parser.add_argument("--sentinel-bytes", type=int, help="CSL demo sentinel bytes")
     parser.add_argument("--stream-bytes", type=int, help="SDK examples stream bytes")
+    parser.add_argument("--memcpy-bytes", type=int, help="CSL runtime memcpy bytes")
+    parser.add_argument(
+        "--math-calls",
+        type=int,
+        help="CSL runtime math/random calls",
+    )
+    parser.add_argument("--malloc-bytes", type=int, help="CSL runtime malloc bytes")
     parser.add_argument("--vector-length", type=int, help="SDK examples vector length")
     parser.add_argument("--matrix-rows", type=int, help="SDK examples matrix rows")
     parser.add_argument("--matrix-cols", type=int, help="SDK examples matrix columns")
@@ -204,6 +213,7 @@ def select_workload_config(
         | GemmWorkloadConfig
         | CslDemoWorkloadConfig
         | SdkExamplesWorkloadConfig
+        | CslRuntimeWorkloadConfig
     ),
     workload_type: str | None,
 ) -> (
@@ -212,9 +222,16 @@ def select_workload_config(
     | GemmWorkloadConfig
     | CslDemoWorkloadConfig
     | SdkExamplesWorkloadConfig
+    | CslRuntimeWorkloadConfig
 ):
     if workload_type is None:
         return workload
+    if workload_type == "csl-runtime":
+        return (
+            workload
+            if isinstance(workload, CslRuntimeWorkloadConfig)
+            else CslRuntimeWorkloadConfig()
+        )
     if workload_type == "sdk-examples":
         return (
             workload
@@ -243,6 +260,7 @@ def apply_workload_overrides(
         | GemmWorkloadConfig
         | CslDemoWorkloadConfig
         | SdkExamplesWorkloadConfig
+        | CslRuntimeWorkloadConfig
     ),
     args: argparse.Namespace,
 ) -> (
@@ -251,8 +269,20 @@ def apply_workload_overrides(
     | GemmWorkloadConfig
     | CslDemoWorkloadConfig
     | SdkExamplesWorkloadConfig
+    | CslRuntimeWorkloadConfig
 ):
-    if isinstance(workload, SdkExamplesWorkloadConfig):
+    if isinstance(workload, CslRuntimeWorkloadConfig):
+        updates = {
+            "active_rows": args.active_rows,
+            "active_cols": args.active_cols,
+            "packet_payload_bytes": args.packet_payload_bytes,
+            "memcpy_bytes": args.memcpy_bytes,
+            "collective_bytes": args.collective_payload_bytes,
+            "fifo_capacity": args.fifo_capacity,
+            "math_calls": args.math_calls,
+            "malloc_bytes": args.malloc_bytes,
+        }
+    elif isinstance(workload, SdkExamplesWorkloadConfig):
         updates = {
             "active_rows": args.active_rows,
             "active_cols": args.active_cols,

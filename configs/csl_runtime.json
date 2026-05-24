@@ -1,0 +1,23 @@
+{
+  "mesh": {
+    "rows": 32,
+    "cols": 32,
+    "link_bandwidth_bytes_per_cycle": 32.0,
+    "router_latency_cycles": 1.0,
+    "link_queue_capacity": 8,
+    "compute_throughput_ops_per_cycle": 256.0,
+    "local_sram_bytes_per_pe": 49152,
+    "memory_bandwidth_bytes_per_cycle": 128.0
+  },
+  "workload": {
+    "type": "csl_runtime",
+    "active_rows": 2,
+    "active_cols": 2,
+    "packet_payload_bytes": 128,
+    "memcpy_bytes": 512,
+    "collective_bytes": 128,
+    "fifo_capacity": 4,
+    "math_calls": 16,
+    "malloc_bytes": 1024
+  }
+}

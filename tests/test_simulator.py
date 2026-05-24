@@ -4,10 +4,13 @@ import unittest
 
 import simpy
 
-from wafersim.config import CslDemoWorkloadConfig, MemoryCopyWorkloadConfig
+from wafersim.config import CslDemoWorkloadConfig, CslRuntimeWorkloadConfig
+from wafersim.config import MemoryCopyWorkloadConfig
 from wafersim.config import MeshConfig, SimulationConfig
 from wafersim.config import SdkExamplesWorkloadConfig
 from wafersim.config import StencilWorkloadConfig
+from wafersim.csl_compat import CslBuiltins, CslCompatibilityRuntime, Direction
+from wafersim.csl_compat import csl_compat_coverage
 from wafersim.network import WaferMesh, percentile
 from wafersim.simulator import run_simulation, strip_internal_records
 
@@ -159,6 +162,116 @@ class SimulatorTests(unittest.TestCase):
         self.assertIn("gemm_collective_ops", example_results)
         self.assertIn("game_of_life_ops", example_results)
         self.assertGreater(public_summary["sdk_examples_total_ops"], 0)
+
+    def test_csl_builtins_mapping(self) -> None:
+        region = CslBuiltins.set_rectangle(2, 3)
+        buffer = CslBuiltins.constant(2, 5)
+        pointer = CslBuiltins.ptr(buffer, 1)
+
+        pointer.store(9)
+
+        self.assertEqual(CslBuiltins.import_module("<math>"), "math")
+        self.assertEqual(CslBuiltins.map_builtin((1, 2), region), 5)
+        self.assertEqual(CslBuiltins.zeros(3), [0, 0, 0])
+        self.assertEqual(buffer, [5, 9])
+        self.assertEqual(CslBuiltins.sizeof(8, 4), 32)
+        self.assertEqual(CslBuiltins.bitcast_int(-1, 8), 255)
+
+    def test_csl_runtime_libraries_mapping(self) -> None:
+        env = simpy.Environment()
+        mesh = WaferMesh(env, MeshConfig(rows=2, cols=2))
+        region = CslBuiltins.set_rectangle(2, 2)
+        runtime = CslCompatibilityRuntime(env, mesh, region, packet_payload_bytes=16)
+
+        self.assertAlmostEqual(runtime.math.sqrt_f32(9.0), 3.0)
+        self.assertTrue(-1.0 <= runtime.random.random_f32(-1.0, 1.0) <= 1.0)
+        self.assertEqual(runtime.layout.get_linear_id((1, 1)), 3)
+        self.assertEqual(runtime.layout.get_coord(2), (1, 0))
+        self.assertEqual(runtime.malloc.malloc(32), 0)
+        runtime.debug.trace("value", (0, 0), 7)
+        runtime.simprint.print((0, 0), "hello")
+
+        env.run(until=env.process(runtime.memcpy.p2p((0, 0), (1, 1), 32)))
+        env.run(until=env.process(runtime.collectives.allreduce((0, 0), 8)))
+
+        fifo = runtime.tile_config.fifo(2)
+        selected = runtime.tile_config.filter_coords(region.coords(), lambda coord: coord[0] == 0)
+
+        self.assertEqual(fifo.capacity, 2)
+        self.assertEqual(len(selected), 2)
+        self.assertEqual(runtime.memcpy.packets, 2)
+        self.assertEqual(runtime.collectives.packets, 6)
+        self.assertEqual(len(runtime.debug.events), 1)
+        self.assertEqual(len(runtime.simprint.messages), 1)
+
+    def test_extended_csl_library_mappings(self) -> None:
+        env = simpy.Environment()
+        mesh = WaferMesh(env, MeshConfig(rows=2, cols=2))
+        region = CslBuiltins.set_rectangle(2, 2)
+        runtime = CslCompatibilityRuntime(env, mesh, region, packet_payload_bytes=16)
+
+        self.assertEqual(runtime.complex.mul(1 + 1j, 1 - 1j), 2 + 0j)
+        runtime.control.block_cmd_stream()
+        self.assertTrue(runtime.control.blocked)
+        runtime.control.unblock_cmd_stream()
+        self.assertFalse(runtime.control.blocked)
+        self.assertEqual(runtime.data_utils.chunk(33, 16), [16, 16, 1])
+        self.assertEqual(runtime.data_utils.reshape([1, 2, 3, 4], 2, 2), [[1, 2], [3, 4]])
+        self.assertEqual(runtime.directions.move((1, 1), Direction.WEST), (1, 0))
+        self.assertEqual(runtime.directions.opposite(Direction.NORTH), Direction.SOUTH)
+        indices = runtime.dsd_ops.strided(0, 3, 2)
+        buffer = [10, 20, 30, 40, 50]
+        self.assertEqual(runtime.dsd_ops.gather(buffer, indices), [10, 30, 50])
+        runtime.dsd_ops.scatter(buffer, indices, [1, 2, 3])
+        self.assertEqual(buffer, [1, 20, 2, 40, 3])
+        self.assertEqual(runtime.string.concat("wafer", "sim"), "wafersim")
+        self.assertEqual(runtime.types.sizeof("f32"), 4)
+        self.assertEqual(runtime.kernels.dot([1.0, 2.0], [3.0, 4.0]), 11.0)
+        self.assertEqual(runtime.fft.estimate_ops(8), 120)
+        self.assertEqual(sum(runtime.tally.histogram([0, 1, 1, 3], 4)), 4)
+        self.assertEqual(runtime.collective_params.size, 4)
+        self.assertEqual(runtime.collective_pe.rank((1, 1)), 3)
+
+    def test_csl_compat_coverage_manifest_documents_scope(self) -> None:
+        coverage = csl_compat_coverage()
+
+        self.assertIn("<memcpy>", coverage["libraries"])
+        self.assertIn("<collectives_2d>", coverage["libraries"])
+        self.assertIn("<dsd_ops>", coverage["libraries"])
+        self.assertIn("@set_tile_code / compiler code placement", coverage["builtins"])
+        self.assertIn("omitted", coverage["builtins"]["@set_tile_code / compiler code placement"])
+
+    def test_csl_runtime_workload_integrates_compat_layer(self) -> None:
+        summary = run_simulation(
+            SimulationConfig(
+                mesh=MeshConfig(rows=2, cols=2),
+                workload=CslRuntimeWorkloadConfig(
+                    active_rows=2,
+                    active_cols=2,
+                    packet_payload_bytes=16,
+                    memcpy_bytes=32,
+                    collective_bytes=8,
+                    fifo_capacity=2,
+                    math_calls=4,
+                    malloc_bytes=64,
+                ),
+            )
+        )
+        public_summary = strip_internal_records(summary)
+        workload = public_summary["workload"]
+        compat_results = workload["compat_results"]
+        runtime_summary = workload["runtime_summary"]
+
+        self.assertEqual(workload["type"], "csl_runtime")
+        self.assertEqual(compat_results["imported_module"], "math")
+        self.assertEqual(compat_results["constant_first_value_after_pointer_store"], 8)
+        self.assertEqual(compat_results["direction_opposite"], "north")
+        self.assertEqual(compat_results["type_size_f32"], 4)
+        self.assertGreater(compat_results["fft_ops"], 0)
+        self.assertEqual(runtime_summary["malloc_used_bytes"], 64)
+        self.assertGreater(runtime_summary["memcpy_packets"], 0)
+        self.assertGreater(runtime_summary["collective_packets"], 0)
+        self.assertGreater(public_summary["csl_runtime_bytes"], 0)
 
 
 if __name__ == "__main__":

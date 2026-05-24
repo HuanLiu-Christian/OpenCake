@@ -47,6 +47,12 @@ Run the later SDK examples concept demo:
 python -m wafersim.cli --config configs/sdk_examples.json
 ```
 
+Run the CSL builtins/libraries compatibility demo:
+
+```bash
+python -m wafersim.cli --config configs/csl_runtime.json
+```
+
 Run tests:
 
 ```bash
@@ -110,6 +116,24 @@ These examples are implemented with Python and SimPy only. Cerebras SDK
 libraries such as `<memcpy>` or `<collectives_2d>` are represented by simulator
 events instead of being imported or compiled.
 
+## CSL Compatibility Layer
+
+`src/wafersim/csl_compat.py` provides Python/SimPy mappings for common CSL
+builtins and SDK libraries:
+
+- builtins: rectangle layout, `@map`-style IDs, zero/constant buffers, pointer
+  load/store, `sizeof`, bitcast, and module import names
+- libraries: math, random, time, debug, simprint, layout, malloc, memcpy,
+  collectives_2d, and tile_config-style FIFO/filter/switch helpers
+
+`configs/csl_runtime.json` runs an integrated smoke workload through this
+compatibility layer. This keeps application-level workloads from depending on
+handwritten packet calls and gives a cleaner path toward later CSL or Chisel
+mapping.
+
+See `docs/csl_compat_mapping.md` for the implemented, partially implemented,
+and intentionally omitted CSL builtin/library mappings.
+
 ## Current Outputs
 
 The CLI prints:
@@ -135,6 +159,7 @@ configs/
   gemm.json
   csl_topics.json
   sdk_examples.json
+  csl_runtime.json
   medium_stencil.json
 docs/
   hardware_mapping.md
