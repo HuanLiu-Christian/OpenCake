@@ -35,6 +35,18 @@ Run the tiled GEMM workload:
 python -m wafersim.cli --config configs/gemm.json
 ```
 
+Run the CSL-compatibility GEMM workload:
+
+```bash
+python -m wafersim.cli --workload csl-gemm --gemm-m 1024 --gemm-n 1024 --gemm-k 1024
+```
+
+Run the CSL GEMV 9 color-streaming pipeline:
+
+```bash
+python -m wafersim.cli --config configs/csl_gemv_streaming.json
+```
+
 Run the CSL-topic concept demo:
 
 ```bash
@@ -118,7 +130,7 @@ events instead of being imported or compiled.
 
 ## CSL Compatibility Layer
 
-`src/wafersim/csl_compat.py` provides Python/SimPy mappings for common CSL
+`src/wafersim/csl/compat.py` provides Python/SimPy mappings for common CSL
 builtins and SDK libraries:
 
 - builtins: rectangle layout, `@map`-style IDs, zero/constant buffers, pointer
@@ -148,15 +160,22 @@ The CLI prints:
 
 ```text
 src/wafersim/
-  config.py      simulator parameters
-  pe.py          processing element timing model
-  network.py     mesh, links, routing, packet metrics
-  workloads.py   memory-copy, GEMM, stencil, and CSL-topic workload generators
-  simulator.py   orchestration and trace export
-  cli.py         command-line entry point
+  config.py            simulator and workload parameters
+  hardware/
+    pe.py              processing element timing model
+    network.py         mesh, links, routing, packet metrics
+  csl/
+    compat.py          CSL-like builtins, libraries, colors, and runtime
+  workloads/
+    __init__.py        memory-copy, GEMM, GEMV streaming, stencil, and demos
+    kernels.py         pure GEMV/GEMM-style numerical kernels
+  simulator.py         orchestration and trace export
+  cli.py               command-line entry point
 configs/
   memory_copy.json
   gemm.json
+  csl_gemm.json
+  csl_gemv_streaming.json
   csl_topics.json
   sdk_examples.json
   csl_runtime.json

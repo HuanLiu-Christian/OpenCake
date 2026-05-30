@@ -4,14 +4,16 @@ import unittest
 
 import simpy
 
-from wafersim.config import CslDemoWorkloadConfig, CslRuntimeWorkloadConfig
+from wafersim.config import CslDemoWorkloadConfig, CslGemmWorkloadConfig
+from wafersim.config import CslGemvStreamingWorkloadConfig
+from wafersim.config import CslRuntimeWorkloadConfig
 from wafersim.config import MemoryCopyWorkloadConfig
 from wafersim.config import MeshConfig, SimulationConfig
 from wafersim.config import SdkExamplesWorkloadConfig
 from wafersim.config import StencilWorkloadConfig
-from wafersim.csl_compat import CslBuiltins, CslCompatibilityRuntime, Direction
-from wafersim.csl_compat import csl_compat_coverage
-from wafersim.network import WaferMesh, percentile
+from wafersim.csl import CslBuiltins, CslCompatibilityRuntime, Direction
+from wafersim.csl import csl_compat_coverage
+from wafersim.hardware.network import WaferMesh, percentile
 from wafersim.simulator import run_simulation, strip_internal_records
 
 
@@ -162,6 +164,55 @@ class SimulatorTests(unittest.TestCase):
         self.assertIn("gemm_collective_ops", example_results)
         self.assertIn("game_of_life_ops", example_results)
         self.assertGreater(public_summary["sdk_examples_total_ops"], 0)
+
+    def test_csl_gemm_uses_compat_runtime(self) -> None:
+        summary = run_simulation(
+            SimulationConfig(
+                mesh=MeshConfig(rows=4, cols=4),
+                workload=CslGemmWorkloadConfig(
+                    m=64,
+                    n=64,
+                    k=64,
+                    tile_m=16,
+                    tile_n=16,
+                    tile_k=16,
+                    packet_payload_bytes=256,
+                ),
+            )
+        )
+        public_summary = strip_internal_records(summary)
+        workload = public_summary["workload"]
+        runtime_summary = workload["runtime_summary"]
+
+        self.assertEqual(workload["type"], "csl_gemm")
+        self.assertEqual(workload["active_pes"], 16)
+        self.assertEqual(workload["total_ops"], 2 * 64 * 64 * 64)
+        self.assertGreater(runtime_summary["memcpy_packets"], 0)
+        self.assertGreater(public_summary["csl_gemm_compute_efficiency"], 0)
+
+    def test_csl_gemv_streaming_color_pipeline(self) -> None:
+        summary = run_simulation(
+            SimulationConfig(
+                mesh=MeshConfig(rows=3, cols=4),
+                workload=CslGemvStreamingWorkloadConfig(
+                    matrix_rows=6,
+                    matrix_cols=8,
+                    kernel_rows=3,
+                    kernel_cols=4,
+                    packet_payload_bytes=64,
+                ),
+            )
+        )
+        public_summary = strip_internal_records(summary)
+        workload = public_summary["workload"]
+
+        self.assertEqual(workload["type"], "csl_gemv_streaming")
+        self.assertTrue(workload["verified"])
+        self.assertEqual(workload["result_y"], [30.0, 94.0, 158.0, 222.0, 286.0, 350.0])
+        self.assertEqual(workload["color_directions"]["x_color"], "south")
+        self.assertEqual(workload["color_directions"]["ax_color_1"], "east")
+        self.assertIn("x_color", workload["color_packets"])
+        self.assertGreater(public_summary["csl_gemv_streaming_color_packets"], 0)
 
     def test_csl_builtins_mapping(self) -> None:
         region = CslBuiltins.set_rectangle(2, 3)

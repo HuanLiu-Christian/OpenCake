@@ -402,6 +402,171 @@ class CslRuntimeWorkloadConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class CslGemvStreamingWorkloadConfig:
+    type: str = "csl_gemv_streaming"
+    matrix_rows: int = 6
+    matrix_cols: int = 8
+    kernel_rows: int = 3
+    kernel_cols: int = 4
+    bytes_per_element: int = 4
+    packet_payload_bytes: int = 64
+    ops_per_mac: int = 2
+
+    def validate(self) -> None:
+        if self.matrix_rows <= 0 or self.matrix_cols <= 0:
+            raise ValueError("CSL GEMV rows and cols must be positive")
+        if self.kernel_rows <= 0 or self.kernel_cols <= 0:
+            raise ValueError("CSL GEMV kernel dimensions must be positive")
+        if self.matrix_rows % self.kernel_rows != 0:
+            raise ValueError("matrix_rows must be divisible by kernel_rows")
+        if self.matrix_cols % self.kernel_cols != 0:
+            raise ValueError("matrix_cols must be divisible by kernel_cols")
+        if self.bytes_per_element <= 0:
+            raise ValueError("bytes per element must be positive")
+        if self.packet_payload_bytes <= 0:
+            raise ValueError("packet payload bytes must be positive")
+        if self.ops_per_mac <= 0:
+            raise ValueError("ops per MAC must be positive")
+
+    @property
+    def rows_per_pe(self) -> int:
+        return self.matrix_rows // self.kernel_rows
+
+    @property
+    def cols_per_pe(self) -> int:
+        return self.matrix_cols // self.kernel_cols
+
+    @property
+    def active_pes(self) -> int:
+        return self.kernel_rows * self.kernel_cols
+
+    @property
+    def a_tile_bytes_per_pe(self) -> int:
+        return self.rows_per_pe * self.cols_per_pe * self.bytes_per_element
+
+    @property
+    def x_chunk_bytes_per_col(self) -> int:
+        return self.cols_per_pe * self.bytes_per_element
+
+    @property
+    def b_chunk_bytes_per_row(self) -> int:
+        return self.rows_per_pe * self.bytes_per_element
+
+    @property
+    def y_chunk_bytes_per_row(self) -> int:
+        return self.rows_per_pe * self.bytes_per_element
+
+    @property
+    def compute_ops(self) -> int:
+        return self.matrix_rows * self.matrix_cols * self.ops_per_mac
+
+    @property
+    def compute_ops_per_pe(self) -> int:
+        return self.rows_per_pe * self.cols_per_pe * self.ops_per_mac
+
+    @property
+    def matrix_bytes(self) -> int:
+        return self.matrix_rows * self.matrix_cols * self.bytes_per_element
+
+    @property
+    def x_bytes(self) -> int:
+        return self.matrix_cols * self.bytes_per_element
+
+    @property
+    def b_bytes(self) -> int:
+        return self.matrix_rows * self.bytes_per_element
+
+    @property
+    def y_bytes(self) -> int:
+        return self.matrix_rows * self.bytes_per_element
+
+    @property
+    def memory_footprint_bytes_per_pe(self) -> int:
+        return self.a_tile_bytes_per_pe + self.x_chunk_bytes_per_col + (
+            2 * self.y_chunk_bytes_per_row
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class CslGemmWorkloadConfig:
+    type: str = "csl_gemm"
+    m: int = 1024
+    n: int = 1024
+    k: int = 1024
+    tile_m: int = 32
+    tile_n: int = 32
+    tile_k: int = 32
+    bytes_per_element: int = 4
+    ops_per_mac: int = 2
+    packet_payload_bytes: int = 1024
+    double_buffer_inputs: bool = True
+    pipeline_k_tiles: bool = True
+
+    def validate(self) -> None:
+        if self.m <= 0 or self.n <= 0 or self.k <= 0:
+            raise ValueError("CSL GEMM dimensions must be positive")
+        if self.tile_m <= 0 or self.tile_n <= 0 or self.tile_k <= 0:
+            raise ValueError("CSL GEMM tile dimensions must be positive")
+        if self.m % self.tile_m != 0:
+            raise ValueError("M must be divisible by tile_m")
+        if self.n % self.tile_n != 0:
+            raise ValueError("N must be divisible by tile_n")
+        if self.k % self.tile_k != 0:
+            raise ValueError("K must be divisible by tile_k")
+        if self.bytes_per_element <= 0:
+            raise ValueError("bytes per element must be positive")
+        if self.ops_per_mac <= 0:
+            raise ValueError("ops per MAC must be positive")
+        if self.packet_payload_bytes <= 0:
+            raise ValueError("packet payload bytes must be positive")
+        if self.pipeline_k_tiles and not self.double_buffer_inputs:
+            raise ValueError("pipeline_k_tiles requires double_buffer_inputs")
+
+    @property
+    def pe_rows(self) -> int:
+        return self.m // self.tile_m
+
+    @property
+    def pe_cols(self) -> int:
+        return self.n // self.tile_n
+
+    @property
+    def active_pes(self) -> int:
+        return self.pe_rows * self.pe_cols
+
+    @property
+    def k_tiles(self) -> int:
+        return self.k // self.tile_k
+
+    @property
+    def a_tile_bytes(self) -> int:
+        return self.tile_m * self.tile_k * self.bytes_per_element
+
+    @property
+    def b_tile_bytes(self) -> int:
+        return self.tile_k * self.tile_n * self.bytes_per_element
+
+    @property
+    def c_tile_bytes(self) -> int:
+        return self.tile_m * self.tile_n * self.bytes_per_element
+
+    @property
+    def memory_footprint_bytes_per_pe(self) -> int:
+        input_buffers = 2 if self.double_buffer_inputs else 1
+        return self.c_tile_bytes + input_buffers * (
+            self.a_tile_bytes + self.b_tile_bytes
+        )
+
+    @property
+    def ops_per_pe_per_k_tile(self) -> int:
+        return self.tile_m * self.tile_n * self.tile_k * self.ops_per_mac
+
+    @property
+    def total_ops(self) -> int:
+        return self.m * self.n * self.k * self.ops_per_mac
+
+
+@dataclass(frozen=True, slots=True)
 class SimulationConfig:
     mesh: MeshConfig = MeshConfig()
     workload: (
@@ -411,6 +576,8 @@ class SimulationConfig:
         | CslDemoWorkloadConfig
         | SdkExamplesWorkloadConfig
         | CslRuntimeWorkloadConfig
+        | CslGemvStreamingWorkloadConfig
+        | CslGemmWorkloadConfig
     ) = StencilWorkloadConfig()
 
     def validate(self) -> None:

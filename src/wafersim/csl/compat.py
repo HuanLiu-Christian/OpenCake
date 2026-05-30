@@ -9,7 +9,7 @@ from typing import Callable, Iterable
 import simpy
 
 from wafersim.config import Coord
-from wafersim.network import WaferMesh
+from wafersim.hardware.network import WaferMesh
 
 
 @dataclass(slots=True)
@@ -266,6 +266,84 @@ class DirectionsLibrary:
             Direction.WEST: Direction.EAST,
             Direction.EAST: Direction.WEST,
         }[direction]
+
+
+@dataclass(frozen=True, slots=True)
+class ColorRouteConfig:
+    color: str
+    direction: Direction | None
+
+
+class ColorRoutingLibrary:
+    """Conceptual CSL color routing library.
+
+    Real CSL colors are configured with rx/tx route bits. This simulator keeps
+    the same intent at functional level: a color is bound to a direction, and
+    packet streams are tagged with that color while using the mesh timing model.
+    """
+
+    def __init__(
+        self,
+        env: simpy.Environment,
+        mesh: WaferMesh,
+        packet_payload_bytes: int,
+    ) -> None:
+        self.env = env
+        self.mesh = mesh
+        self.packet_payload_bytes = packet_payload_bytes
+        self.routes: dict[str, ColorRouteConfig] = {}
+        self.bytes: dict[str, int] = {}
+        self.packets: dict[str, int] = {}
+
+    def configure(self, color: str, direction: Direction | None) -> None:
+        self.routes[color] = ColorRouteConfig(color=color, direction=direction)
+
+    def direction(self, color: str) -> Direction | None:
+        return self.routes[color].direction
+
+    def send(
+        self,
+        color: str,
+        src: Coord | None,
+        dst: Coord | None,
+        size_bytes: int,
+    ):
+        if color not in self.routes:
+            raise ValueError(f"color is not configured: {color}")
+        if size_bytes < 0:
+            raise ValueError("color stream size cannot be negative")
+
+        chunks = self._packet_chunks(size_bytes)
+        self.bytes[color] = self.bytes.get(color, 0) + size_bytes
+        self.packets[color] = self.packets.get(color, 0) + len(chunks)
+
+        if src is None or dst is None or src == dst:
+            coord = dst or src or (0, 0)
+            yield from self.mesh.pes[coord].access_memory(size_bytes)
+            return
+
+        events = [
+            self.env.process(
+                self.mesh.send(
+                    src=src,
+                    dst=dst,
+                    size_bytes=chunk,
+                    kind=f"compat:color:{color}",
+                )
+            )
+            for chunk in chunks
+        ]
+        if events:
+            yield simpy.events.AllOf(self.env, events)
+
+    def _packet_chunks(self, total_bytes: int) -> list[int]:
+        chunks = []
+        remaining = total_bytes
+        while remaining > 0:
+            chunk = min(self.packet_payload_bytes, remaining)
+            chunks.append(chunk)
+            remaining -= chunk
+        return chunks
 
 
 class DsdOpsLibrary:
@@ -559,6 +637,7 @@ CSL_COMPAT_COVERAGE: dict[str, dict[str, str]] = {
         "<data_utils>": "implemented for chunk/flatten/reshape",
         "<debug>": "implemented as in-memory trace events",
         "<directions>": "implemented for N/S/E/W movement and opposites",
+        "<color_routing>": "implemented as conceptual color-to-direction packet streams",
         "<dsd_ops>": "partial: strided/gather/scatter address-list model",
         "<empty>": "implemented as noop",
         "<layout>": "implemented for coord/rank mapping",
@@ -601,6 +680,11 @@ class CslCompatibilityRuntime:
         self.control = ControlLibrary(self.env)
         self.data_utils = DataUtilsLibrary()
         self.directions = DirectionsLibrary()
+        self.colors = ColorRoutingLibrary(
+            self.env,
+            self.mesh,
+            self.packet_payload_bytes,
+        )
         self.dsd_ops = DsdOpsLibrary()
         self.empty = EmptyLibrary()
         self.string = StringLibrary()
@@ -633,6 +717,8 @@ class CslCompatibilityRuntime:
             "memcpy_bytes": self.memcpy.bytes,
             "collective_packets": self.collectives.packets,
             "collective_bytes": self.collectives.bytes,
+            "color_packets": sum(self.colors.packets.values()),
+            "color_bytes": sum(self.colors.bytes.values()),
             "timestamp_cycles": self.time.timestamp(),
             "control_blocked": int(self.control.blocked),
             "simprint_log": self.simprint.messages,

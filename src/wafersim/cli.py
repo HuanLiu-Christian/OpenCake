@@ -5,7 +5,9 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
-from wafersim.config import CslDemoWorkloadConfig, CslRuntimeWorkloadConfig
+from wafersim.config import CslDemoWorkloadConfig, CslGemmWorkloadConfig
+from wafersim.config import CslGemvStreamingWorkloadConfig
+from wafersim.config import CslRuntimeWorkloadConfig
 from wafersim.config import GemmWorkloadConfig
 from wafersim.config import MemoryCopyWorkloadConfig
 from wafersim.config import SdkExamplesWorkloadConfig
@@ -27,6 +29,8 @@ def main() -> None:
             "memory-copy",
             "array-stream",
             "gemm",
+            "csl-gemm",
+            "csl-gemv-streaming",
             "csl-demo",
             "csl-runtime",
             "sdk-examples",
@@ -157,6 +161,10 @@ def main() -> None:
         help="CSL runtime math/random calls",
     )
     parser.add_argument("--malloc-bytes", type=int, help="CSL runtime malloc bytes")
+    parser.add_argument("--gemv-rows", type=int, help="CSL GEMV streaming matrix rows")
+    parser.add_argument("--gemv-cols", type=int, help="CSL GEMV streaming matrix columns")
+    parser.add_argument("--kernel-rows", type=int, help="CSL GEMV streaming PE rows")
+    parser.add_argument("--kernel-cols", type=int, help="CSL GEMV streaming PE columns")
     parser.add_argument("--vector-length", type=int, help="SDK examples vector length")
     parser.add_argument("--matrix-rows", type=int, help="SDK examples matrix rows")
     parser.add_argument("--matrix-cols", type=int, help="SDK examples matrix columns")
@@ -214,6 +222,8 @@ def select_workload_config(
         | CslDemoWorkloadConfig
         | SdkExamplesWorkloadConfig
         | CslRuntimeWorkloadConfig
+        | CslGemvStreamingWorkloadConfig
+        | CslGemmWorkloadConfig
     ),
     workload_type: str | None,
 ) -> (
@@ -223,9 +233,23 @@ def select_workload_config(
     | CslDemoWorkloadConfig
     | SdkExamplesWorkloadConfig
     | CslRuntimeWorkloadConfig
+    | CslGemvStreamingWorkloadConfig
+    | CslGemmWorkloadConfig
 ):
     if workload_type is None:
         return workload
+    if workload_type == "csl-gemm":
+        return (
+            workload
+            if isinstance(workload, CslGemmWorkloadConfig)
+            else CslGemmWorkloadConfig()
+        )
+    if workload_type == "csl-gemv-streaming":
+        return (
+            workload
+            if isinstance(workload, CslGemvStreamingWorkloadConfig)
+            else CslGemvStreamingWorkloadConfig()
+        )
     if workload_type == "csl-runtime":
         return (
             workload
@@ -261,6 +285,8 @@ def apply_workload_overrides(
         | CslDemoWorkloadConfig
         | SdkExamplesWorkloadConfig
         | CslRuntimeWorkloadConfig
+        | CslGemvStreamingWorkloadConfig
+        | CslGemmWorkloadConfig
     ),
     args: argparse.Namespace,
 ) -> (
@@ -270,8 +296,37 @@ def apply_workload_overrides(
     | CslDemoWorkloadConfig
     | SdkExamplesWorkloadConfig
     | CslRuntimeWorkloadConfig
+    | CslGemvStreamingWorkloadConfig
+    | CslGemmWorkloadConfig
 ):
-    if isinstance(workload, CslRuntimeWorkloadConfig):
+    if isinstance(workload, CslGemmWorkloadConfig):
+        updates = {
+            "m": args.gemm_m,
+            "n": args.gemm_n,
+            "k": args.gemm_k,
+            "tile_m": args.tile_m,
+            "tile_n": args.tile_n,
+            "tile_k": args.tile_k,
+            "bytes_per_element": args.bytes_per_element,
+            "ops_per_mac": args.ops_per_mac,
+            "packet_payload_bytes": args.packet_payload_bytes,
+        }
+        if args.single_buffer_inputs:
+            updates["double_buffer_inputs"] = False
+            updates["pipeline_k_tiles"] = False
+        if args.no_gemm_pipeline:
+            updates["pipeline_k_tiles"] = False
+    elif isinstance(workload, CslGemvStreamingWorkloadConfig):
+        updates = {
+            "matrix_rows": args.gemv_rows,
+            "matrix_cols": args.gemv_cols,
+            "kernel_rows": args.kernel_rows,
+            "kernel_cols": args.kernel_cols,
+            "bytes_per_element": args.bytes_per_element,
+            "ops_per_mac": args.ops_per_mac,
+            "packet_payload_bytes": args.packet_payload_bytes,
+        }
+    elif isinstance(workload, CslRuntimeWorkloadConfig):
         updates = {
             "active_rows": args.active_rows,
             "active_cols": args.active_cols,

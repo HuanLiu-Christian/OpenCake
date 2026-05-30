@@ -7,7 +7,7 @@ from typing import Iterable
 import simpy
 
 from wafersim.config import Coord, MeshConfig
-from wafersim.pe import ProcessingElement
+from wafersim.hardware.pe import ProcessingElement
 
 
 @dataclass(slots=True)

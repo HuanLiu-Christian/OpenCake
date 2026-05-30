@@ -1,0 +1,22 @@
+{
+  "mesh": {
+    "rows": 3,
+    "cols": 4,
+    "link_bandwidth_bytes_per_cycle": 32.0,
+    "router_latency_cycles": 1.0,
+    "link_queue_capacity": 8,
+    "compute_throughput_ops_per_cycle": 256.0,
+    "local_sram_bytes_per_pe": 49152,
+    "memory_bandwidth_bytes_per_cycle": 128.0
+  },
+  "workload": {
+    "type": "csl_gemv_streaming",
+    "matrix_rows": 6,
+    "matrix_cols": 8,
+    "kernel_rows": 3,
+    "kernel_cols": 4,
+    "bytes_per_element": 4,
+    "packet_payload_bytes": 64,
+    "ops_per_mac": 2
+  }
+}

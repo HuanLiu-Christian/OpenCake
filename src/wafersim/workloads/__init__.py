@@ -4,13 +4,16 @@ import math
 
 import simpy
 
-from wafersim.config import CslDemoWorkloadConfig, CslRuntimeWorkloadConfig, Coord
+from wafersim.config import CslDemoWorkloadConfig, CslGemmWorkloadConfig
+from wafersim.config import CslGemvStreamingWorkloadConfig
+from wafersim.config import CslRuntimeWorkloadConfig, Coord
 from wafersim.config import GemmWorkloadConfig
 from wafersim.config import MemoryCopyWorkloadConfig
 from wafersim.config import SdkExamplesWorkloadConfig
 from wafersim.config import StencilWorkloadConfig
-from wafersim.csl_compat import CslBuiltins, CslCompatibilityRuntime, Direction
-from wafersim.network import WaferMesh
+from wafersim.csl import CslBuiltins, CslCompatibilityRuntime, Direction
+from wafersim.hardware.network import WaferMesh
+from wafersim.workloads.kernels import gemv
 
 
 class StencilWorkload:
@@ -335,6 +338,421 @@ class GemmWorkload:
             env.process(mesh.pes[coord].compute(self.config.ops_per_pe_per_k_tile))
             for coord in active_coords
         ]
+
+
+class CslGemmWorkload:
+    """Tiled GEMM driven through the CSL compatibility layer.
+
+    This keeps the same output-stationary dataflow as GemmWorkload, but routes
+    setup and data movement through CslCompatibilityRuntime libraries so future
+    app-level workloads can use CSL-like APIs.
+    """
+
+    def __init__(self, config: CslGemmWorkloadConfig) -> None:
+        config.validate()
+        self.config = config
+        self.runtime_summary: dict[str, int | float | list[str]] = {}
+
+    def run(self, env: simpy.Environment, mesh: WaferMesh):
+        self._validate_mesh_shape(mesh)
+        region = CslBuiltins.set_rectangle(self.config.pe_rows, self.config.pe_cols)
+        active_coords = region.coords()
+        runtime = CslCompatibilityRuntime(
+            env=env,
+            mesh=mesh,
+            region=region,
+            packet_payload_bytes=self.config.packet_payload_bytes,
+        )
+
+        for coord in active_coords:
+            mesh.pes[coord].reserve_memory(self.config.memory_footprint_bytes_per_pe)
+
+        runtime.debug.trace("csl_gemm_start", (0, 0), self.config.total_ops)
+        runtime.simprint.print((0, 0), "csl_gemm started")
+
+        for k_tile in range(self.config.k_tiles):
+            if self.config.pipeline_k_tiles:
+                events = (
+                    self._start_collective_stream_events(env, runtime, active_coords, k_tile)
+                    + self._start_memory_events(env, mesh, active_coords)
+                    + self._start_compute_events(env, mesh, active_coords)
+                )
+                if events:
+                    yield simpy.events.AllOf(env, events)
+            else:
+                stream_events = self._start_collective_stream_events(
+                    env, runtime, active_coords, k_tile
+                )
+                if stream_events:
+                    yield simpy.events.AllOf(env, stream_events)
+                memory_events = self._start_memory_events(env, mesh, active_coords)
+                if memory_events:
+                    yield simpy.events.AllOf(env, memory_events)
+                compute_events = self._start_compute_events(env, mesh, active_coords)
+                if compute_events:
+                    yield simpy.events.AllOf(env, compute_events)
+
+        writeback_events = [
+            env.process(mesh.pes[coord].access_memory(self.config.c_tile_bytes))
+            for coord in active_coords
+        ]
+        if writeback_events:
+            yield simpy.events.AllOf(env, writeback_events)
+
+        runtime.debug.trace("csl_gemm_done", (0, 0), env.now)
+        runtime.simprint.print((0, 0), "csl_gemm done")
+        self.runtime_summary = runtime.summary()
+
+    def summary(self, mesh: WaferMesh) -> dict[str, int | bool | str | dict[str, object]]:
+        return {
+            "type": "csl_gemm",
+            "m": self.config.m,
+            "n": self.config.n,
+            "k": self.config.k,
+            "tile_m": self.config.tile_m,
+            "tile_n": self.config.tile_n,
+            "tile_k": self.config.tile_k,
+            "pe_rows": self.config.pe_rows,
+            "pe_cols": self.config.pe_cols,
+            "active_pes": self.config.active_pes,
+            "k_tiles": self.config.k_tiles,
+            "bytes_per_element": self.config.bytes_per_element,
+            "ops_per_mac": self.config.ops_per_mac,
+            "packet_payload_bytes": self.config.packet_payload_bytes,
+            "double_buffer_inputs": self.config.double_buffer_inputs,
+            "pipeline_k_tiles": self.config.pipeline_k_tiles,
+            "a_tile_bytes": self.config.a_tile_bytes,
+            "b_tile_bytes": self.config.b_tile_bytes,
+            "c_tile_bytes": self.config.c_tile_bytes,
+            "memory_footprint_bytes_per_pe": self.config.memory_footprint_bytes_per_pe,
+            "ops_per_pe_per_k_tile": self.config.ops_per_pe_per_k_tile,
+            "total_ops": self.config.total_ops,
+            "runtime_summary": self.runtime_summary,
+        }
+
+    def result_summary(
+        self, mesh: WaferMesh, elapsed_cycles: float
+    ) -> dict[str, float | int]:
+        ops_per_cycle = (
+            self.config.total_ops / elapsed_cycles if elapsed_cycles > 0 else 0.0
+        )
+        peak_ops_per_cycle = (
+            self.config.active_pes * mesh.config.compute_throughput_ops_per_cycle
+        )
+        return {
+            "csl_gemm_ops_per_cycle": ops_per_cycle,
+            "csl_gemm_peak_ops_per_cycle": peak_ops_per_cycle,
+            "csl_gemm_compute_efficiency": (
+                ops_per_cycle / peak_ops_per_cycle if peak_ops_per_cycle > 0 else 0.0
+            ),
+            "csl_gemm_runtime_memcpy_packets": self.runtime_summary.get("memcpy_packets", 0),
+            "csl_gemm_runtime_memcpy_bytes": self.runtime_summary.get("memcpy_bytes", 0),
+        }
+
+    def _validate_mesh_shape(self, mesh: WaferMesh) -> None:
+        if self.config.pe_rows > mesh.config.rows:
+            raise ValueError("CSL GEMM tile rows require more PE rows than the mesh has")
+        if self.config.pe_cols > mesh.config.cols:
+            raise ValueError("CSL GEMM tile cols require more PE cols than the mesh has")
+
+    def _start_collective_stream_events(
+        self,
+        env: simpy.Environment,
+        runtime: CslCompatibilityRuntime,
+        active_coords: list[Coord],
+        k_tile: int,
+    ):
+        events = []
+        active_set = set(active_coords)
+        for row in range(self.config.pe_rows):
+            for col in range(self.config.pe_cols - 1):
+                src = (row, col)
+                dst = (row, col + 1)
+                if src in active_set and dst in active_set:
+                    events.append(
+                        env.process(
+                            runtime.memcpy.p2p(src, dst, self.config.a_tile_bytes)
+                        )
+                    )
+        for row in range(self.config.pe_rows - 1):
+            for col in range(self.config.pe_cols):
+                src = (row, col)
+                dst = (row + 1, col)
+                if src in active_set and dst in active_set:
+                    events.append(
+                        env.process(
+                            runtime.memcpy.p2p(src, dst, self.config.b_tile_bytes)
+                        )
+                    )
+        runtime.debug.trace("csl_gemm_k_tile", (0, 0), k_tile)
+        return events
+
+    def _start_memory_events(
+        self,
+        env: simpy.Environment,
+        mesh: WaferMesh,
+        active_coords: list[Coord],
+    ):
+        return [
+            env.process(
+                mesh.pes[coord].access_memory(
+                    self.config.a_tile_bytes + self.config.b_tile_bytes
+                )
+            )
+            for coord in active_coords
+        ]
+
+    def _start_compute_events(
+        self,
+        env: simpy.Environment,
+        mesh: WaferMesh,
+        active_coords: list[Coord],
+    ):
+        return [
+            env.process(mesh.pes[coord].compute(self.config.ops_per_pe_per_k_tile))
+            for coord in active_coords
+        ]
+
+
+class CslGemvStreamingWorkload:
+    """Color-routed GEMV streaming pipeline from the CSL GEMV 9 tutorial."""
+
+    COLOR_DIRECTIONS: dict[str, Direction | None] = {
+        "MEMCPYH2D_DATA_1": None,
+        "MEMCPYH2D_DATA_2": None,
+        "x_color": Direction.SOUTH,
+        "ax_color_1": Direction.EAST,
+        "ax_color_2": Direction.EAST,
+        "MEMCPYD2H_DATA_1": None,
+    }
+
+    def __init__(self, config: CslGemvStreamingWorkloadConfig) -> None:
+        config.validate()
+        self.config = config
+        self.pipeline_events: list[str] = []
+        self.result: list[float] = []
+        self.expected: list[float] = []
+        self.runtime_summary: dict[str, int | float | list[str]] = {}
+        self.color_packets: dict[str, int] = {}
+        self.color_bytes: dict[str, int] = {}
+
+    def run(self, env: simpy.Environment, mesh: WaferMesh):
+        self._validate_mesh_shape(mesh)
+        region = CslBuiltins.set_rectangle(self.config.kernel_rows, self.config.kernel_cols)
+        runtime = CslCompatibilityRuntime(
+            env=env,
+            mesh=mesh,
+            region=region,
+            packet_payload_bytes=self.config.packet_payload_bytes,
+        )
+        self._configure_colors(runtime)
+        coords = region.coords()
+        for coord in coords:
+            mesh.pes[coord].reserve_memory(self.config.memory_footprint_bytes_per_pe)
+
+        matrix = [
+            float(index)
+            for index in range(self.config.matrix_rows * self.config.matrix_cols)
+        ]
+        vector = [1.0 for _ in range(self.config.matrix_cols)]
+        bias = [2.0 for _ in range(self.config.matrix_rows)]
+        self.expected = gemv(
+            matrix,
+            vector,
+            bias,
+            self.config.matrix_rows,
+            self.config.matrix_cols,
+        )
+
+        self._record("layout: set_rectangle(kernel_rows,kernel_cols), bind colors to routes")
+        runtime.debug.trace("gemv9_layout", (0, 0), self.config.active_pes)
+
+        a_init_events = [
+            env.process(mesh.pes[coord].access_memory(self.config.a_tile_bytes_per_pe))
+            for coord in coords
+        ]
+        if a_init_events:
+            yield simpy.events.AllOf(env, a_init_events)
+        self._record("h2d: preload local A tiles into every PE")
+
+        yield from self._stream_x_by_color(env, runtime)
+        self._record("color MEMCPYH2D_DATA_1 -> x_color SOUTH: stream x through columns")
+
+        compute_events = [
+            env.process(mesh.pes[coord].compute(self.config.compute_ops_per_pe))
+            for coord in coords
+        ]
+        if compute_events:
+            yield simpy.events.AllOf(env, compute_events)
+        self._record("task x_color: each PE computes local A_tile*x_chunk")
+
+        yield from self._stream_b_by_color(env, runtime)
+        self._record("color MEMCPYH2D_DATA_2: stream b into west edge")
+
+        yield from self._reduce_ax_by_color(env, runtime)
+        self._record("colors ax_color_1/ax_color_2 EAST: reduce partial Ax+b")
+
+        yield from self._stream_y_d2h_by_color(env, runtime)
+        self.result = gemv(
+            matrix,
+            vector,
+            bias,
+            self.config.matrix_rows,
+            self.config.matrix_cols,
+        )
+        self._record("color MEMCPYD2H_DATA_1: stream final y back to host")
+
+        runtime.debug.trace("gemv9_done", (0, 0), env.now)
+        runtime.simprint.print((0, 0), "gemv9 streaming done")
+        self._record("host: verify y against expected result")
+        self.runtime_summary = runtime.summary()
+        self.color_packets = dict(runtime.colors.packets)
+        self.color_bytes = dict(runtime.colors.bytes)
+
+    def summary(self, mesh: WaferMesh) -> dict[str, object]:
+        return {
+            "type": "csl_gemv_streaming",
+            "matrix_rows": self.config.matrix_rows,
+            "matrix_cols": self.config.matrix_cols,
+            "kernel_rows": self.config.kernel_rows,
+            "kernel_cols": self.config.kernel_cols,
+            "rows_per_pe": self.config.rows_per_pe,
+            "cols_per_pe": self.config.cols_per_pe,
+            "bytes_per_element": self.config.bytes_per_element,
+            "packet_payload_bytes": self.config.packet_payload_bytes,
+            "matrix_bytes": self.config.matrix_bytes,
+            "x_bytes": self.config.x_bytes,
+            "b_bytes": self.config.b_bytes,
+            "y_bytes": self.config.y_bytes,
+            "a_tile_bytes_per_pe": self.config.a_tile_bytes_per_pe,
+            "memory_footprint_bytes_per_pe": (
+                self.config.memory_footprint_bytes_per_pe
+            ),
+            "compute_ops": self.config.compute_ops,
+            "compute_ops_per_pe": self.config.compute_ops_per_pe,
+            "color_directions": self._color_direction_summary(),
+            "color_packets": self.color_packets,
+            "color_bytes": self.color_bytes,
+            "pipeline_events": self.pipeline_events,
+            "expected_y": self.expected,
+            "result_y": self.result,
+            "verified": self.result == self.expected,
+            "runtime_summary": self.runtime_summary,
+        }
+
+    def result_summary(
+        self, mesh: WaferMesh, elapsed_cycles: float
+    ) -> dict[str, float | int | bool]:
+        return {
+            "csl_gemv_streaming_ops_per_cycle": (
+                self.config.compute_ops / elapsed_cycles if elapsed_cycles > 0 else 0.0
+            ),
+            "csl_gemv_streaming_color_packets": sum(self.color_packets.values()),
+            "csl_gemv_streaming_color_bytes": sum(self.color_bytes.values()),
+            "csl_gemv_streaming_verified": self.result == self.expected,
+        }
+
+    def _validate_mesh_shape(self, mesh: WaferMesh) -> None:
+        if self.config.kernel_rows > mesh.config.rows:
+            raise ValueError("CSL GEMV streaming kernel rows exceed mesh rows")
+        if self.config.kernel_cols > mesh.config.cols:
+            raise ValueError("CSL GEMV streaming kernel cols exceed mesh cols")
+
+    def _configure_colors(self, runtime: CslCompatibilityRuntime) -> None:
+        for color, direction in self.COLOR_DIRECTIONS.items():
+            runtime.colors.configure(color, direction)
+
+    def _color_direction_summary(self) -> dict[str, str]:
+        return {
+            color: direction.value if direction is not None else "ramp"
+            for color, direction in self.COLOR_DIRECTIONS.items()
+        }
+
+    def _stream_x_by_color(
+        self, env: simpy.Environment, runtime: CslCompatibilityRuntime
+    ):
+        events = []
+        for col in range(self.config.kernel_cols):
+            events.append(
+                env.process(
+                    runtime.colors.send(
+                        "MEMCPYH2D_DATA_1",
+                        None,
+                        (0, col),
+                        self.config.x_chunk_bytes_per_col,
+                    )
+                )
+            ),
+            for row in range(self.config.kernel_rows - 1):
+                events.append(
+                    env.process(
+                        runtime.colors.send(
+                            "x_color",
+                            (row, col),
+                            (row + 1, col),
+                            self.config.x_chunk_bytes_per_col,
+                        )
+                    )
+                )
+        if events:
+            yield simpy.events.AllOf(env, events)
+
+    def _stream_b_by_color(
+        self, env: simpy.Environment, runtime: CslCompatibilityRuntime
+    ):
+        events = [
+            env.process(
+                runtime.colors.send(
+                    "MEMCPYH2D_DATA_2",
+                    None,
+                    (row, 0),
+                    self.config.b_chunk_bytes_per_row,
+                )
+            )
+            for row in range(self.config.kernel_rows)
+        ]
+        if events:
+            yield simpy.events.AllOf(env, events)
+
+    def _reduce_ax_by_color(
+        self, env: simpy.Environment, runtime: CslCompatibilityRuntime
+    ):
+        events = []
+        for row in range(self.config.kernel_rows):
+            for col in range(self.config.kernel_cols - 1):
+                color = "ax_color_1" if col % 2 == 0 else "ax_color_2"
+                events.append(
+                    env.process(
+                        runtime.colors.send(
+                            color,
+                            (row, col),
+                            (row, col + 1),
+                            self.config.y_chunk_bytes_per_row,
+                        )
+                    )
+                )
+        if events:
+            yield simpy.events.AllOf(env, events)
+
+    def _stream_y_d2h_by_color(
+        self, env: simpy.Environment, runtime: CslCompatibilityRuntime
+    ):
+        events = [
+            env.process(
+                runtime.colors.send(
+                    "MEMCPYD2H_DATA_1",
+                    (row, self.config.kernel_cols - 1),
+                    None,
+                    self.config.y_chunk_bytes_per_row,
+                )
+            )
+            for row in range(self.config.kernel_rows)
+        ]
+        if events:
+            yield simpy.events.AllOf(env, events)
+
+    def _record(self, event: str) -> None:
+        self.pipeline_events.append(event)
 
 
 class CslDemoWorkload:

@@ -6,14 +6,17 @@ from typing import Any
 
 import simpy
 
-from wafersim.config import CslDemoWorkloadConfig, CslRuntimeWorkloadConfig
+from wafersim.config import CslDemoWorkloadConfig, CslGemmWorkloadConfig
+from wafersim.config import CslGemvStreamingWorkloadConfig
+from wafersim.config import CslRuntimeWorkloadConfig
 from wafersim.config import GemmWorkloadConfig
 from wafersim.config import MemoryCopyWorkloadConfig
 from wafersim.config import MeshConfig, SimulationConfig
 from wafersim.config import SdkExamplesWorkloadConfig
 from wafersim.config import StencilWorkloadConfig
-from wafersim.network import PacketRecord, WaferMesh
-from wafersim.workloads import CslDemoWorkload, CslRuntimeWorkload
+from wafersim.hardware.network import PacketRecord, WaferMesh
+from wafersim.workloads import CslDemoWorkload, CslGemmWorkload, CslRuntimeWorkload
+from wafersim.workloads import CslGemvStreamingWorkload
 from wafersim.workloads import GemmWorkload, MemoryCopyWorkload
 from wafersim.workloads import SdkExamplesWorkload
 from wafersim.workloads import StencilWorkload
@@ -44,7 +47,12 @@ def run_simulation(config: SimulationConfig) -> dict[str, Any]:
     }
     if isinstance(
         workload,
-        MemoryCopyWorkload | GemmWorkload | SdkExamplesWorkload | CslRuntimeWorkload,
+        MemoryCopyWorkload
+        | GemmWorkload
+        | SdkExamplesWorkload
+        | CslRuntimeWorkload
+        | CslGemvStreamingWorkload
+        | CslGemmWorkload,
     ):
         summary.update(workload.result_summary(mesh, elapsed))
     return summary
@@ -56,7 +64,11 @@ def load_config(path: Path) -> SimulationConfig:
     workload_data = data.get("workload", {})
     workload_type = normalize_workload_type(workload_data.get("type", "stencil"))
     workload_data = {**workload_data, "type": workload_type}
-    if workload_type == "csl_runtime":
+    if workload_type == "csl_gemm":
+        workload = CslGemmWorkloadConfig(**workload_data)
+    elif workload_type == "csl_gemv_streaming":
+        workload = CslGemvStreamingWorkloadConfig(**workload_data)
+    elif workload_type == "csl_runtime":
         workload = CslRuntimeWorkloadConfig(**workload_data)
     elif workload_type == "sdk_examples":
         workload = SdkExamplesWorkloadConfig(**workload_data)
@@ -89,6 +101,8 @@ def make_workload(
         | CslDemoWorkloadConfig
         | SdkExamplesWorkloadConfig
         | CslRuntimeWorkloadConfig
+        | CslGemvStreamingWorkloadConfig
+        | CslGemmWorkloadConfig
     ),
 ) -> (
     StencilWorkload
@@ -97,7 +111,13 @@ def make_workload(
     | CslDemoWorkload
     | SdkExamplesWorkload
     | CslRuntimeWorkload
+    | CslGemvStreamingWorkload
+    | CslGemmWorkload
 ):
+    if isinstance(config, CslGemmWorkloadConfig):
+        return CslGemmWorkload(config)
+    if isinstance(config, CslGemvStreamingWorkloadConfig):
+        return CslGemvStreamingWorkload(config)
     if isinstance(config, CslRuntimeWorkloadConfig):
         return CslRuntimeWorkload(config)
     if isinstance(config, SdkExamplesWorkloadConfig):
