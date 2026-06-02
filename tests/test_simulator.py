@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 import unittest
 
 import simpy
@@ -13,6 +14,7 @@ from wafersim.config import SdkExamplesWorkloadConfig
 from wafersim.config import StencilWorkloadConfig
 from wafersim.csl import CslBuiltins, CslCompatibilityRuntime, Direction
 from wafersim.csl import csl_compat_coverage
+from wafersim.csl import load_csl_example
 from wafersim.hardware.network import WaferMesh, percentile
 from wafersim.simulator import run_simulation, strip_internal_records
 
@@ -212,6 +214,37 @@ class SimulatorTests(unittest.TestCase):
         self.assertEqual(workload["color_directions"]["x_color"], "south")
         self.assertEqual(workload["color_directions"]["ax_color_1"], "east")
         self.assertIn("x_color", workload["color_packets"])
+        self.assertGreater(public_summary["csl_gemv_streaming_color_packets"], 0)
+
+    def test_csl_style_gemv_example_files_drive_simulation(self) -> None:
+        example_dir = Path(__file__).resolve().parents[1] / "examples/gemv_09_streaming"
+        program = load_csl_example(example_dir)
+
+        self.assertEqual(program.kernel, "gemv_09_streaming")
+        self.assertEqual(program.rectangle, ("kernel_rows", "kernel_cols"))
+        self.assertEqual(program.colors["x_color"], Direction.SOUTH)
+        self.assertIn("compute_local_ax", program.tasks)
+
+        summary = run_simulation(
+            SimulationConfig(
+                mesh=MeshConfig(
+                    rows=program.int_constant("mesh_rows"),
+                    cols=program.int_constant("mesh_cols"),
+                ),
+                workload=CslGemvStreamingWorkloadConfig(
+                    matrix_rows=program.int_constant("matrix_rows"),
+                    matrix_cols=program.int_constant("matrix_cols"),
+                    kernel_rows=program.int_constant("kernel_rows"),
+                    kernel_cols=program.int_constant("kernel_cols"),
+                    bytes_per_element=program.int_constant("bytes_per_element"),
+                    packet_payload_bytes=program.int_constant("packet_payload_bytes"),
+                    ops_per_mac=program.int_constant("ops_per_mac"),
+                ),
+            )
+        )
+        public_summary = strip_internal_records(summary)
+
+        self.assertTrue(public_summary["workload"]["verified"])
         self.assertGreater(public_summary["csl_gemv_streaming_color_packets"], 0)
 
     def test_csl_builtins_mapping(self) -> None:

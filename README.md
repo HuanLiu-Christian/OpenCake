@@ -47,6 +47,13 @@ Run the CSL GEMV 9 color-streaming pipeline:
 python -m wafersim.cli --config configs/csl_gemv_streaming.json
 ```
 
+Run the same GEMV 9 model from a CSL-style example directory:
+
+```bash
+python examples/gemv_09_streaming/run.py
+python examples/gemv_09_streaming/run.py --matrix-rows 1024 --matrix-cols 1024 --kernel-rows 32 --kernel-cols 32
+```
+
 Run the CSL-topic concept demo:
 
 ```bash
@@ -146,6 +153,23 @@ mapping.
 See `docs/csl_compat_mapping.md` for the implemented, partially implemented,
 and intentionally omitted CSL builtin/library mappings.
 
+## CSL-Style Example Layout
+
+The simulator also supports a Cerebras SDK-like example structure:
+
+```text
+examples/gemv_09_streaming/
+  layout.csl       mesh rectangle, color names, and route directions
+  pe_program.csl   PE-local GEMV task declarations
+  run.py           host-side launcher that converts the CSL-style files into
+                   a SimPy SimulationConfig
+```
+
+This path preserves the existing Python/SimPy builtins and libraries. The CSL
+files are parsed as structural simulator input; they are not compiled by the
+Cerebras SDK. This makes the dataflow easier to compare with public SDK examples
+while keeping local execution dependent only on Python and SimPy.
+
 ## Current Outputs
 
 The CLI prints:
@@ -182,6 +206,11 @@ configs/
   medium_stencil.json
 docs/
   hardware_mapping.md
+examples/
+  gemv_09_streaming/
+    layout.csl
+    pe_program.csl
+    run.py
 tests/
   test_simulator.py
 ```

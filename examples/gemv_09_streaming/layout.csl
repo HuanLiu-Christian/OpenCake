@@ -1,0 +1,32 @@
+// GEMV 9 streaming layout, expressed as CSL-style simulator input.
+// This file is parsed by examples/gemv_09_streaming/run.py.
+
+const mesh_rows = 32;
+const mesh_cols = 32;
+const kernel_rows = 3;
+const kernel_cols = 4;
+const matrix_rows = 6;
+const matrix_cols = 8;
+const bytes_per_element = 4;
+const packet_payload_bytes = 64;
+const ops_per_mac = 2;
+
+// wafersim: route MEMCPYH2D_DATA_1 ramp
+// wafersim: route MEMCPYH2D_DATA_2 ramp
+// wafersim: route x_color south
+// wafersim: route ax_color_1 east
+// wafersim: route ax_color_2 east
+// wafersim: route MEMCPYD2H_DATA_1 ramp
+
+layout {
+  @set_rectangle(kernel_rows, kernel_cols);
+  @set_tile_code(0, 0, "pe_program.csl", .{
+    .kernel_rows = kernel_rows,
+    .kernel_cols = kernel_cols,
+    .matrix_rows = matrix_rows,
+    .matrix_cols = matrix_cols,
+    .bytes_per_element = bytes_per_element,
+    .packet_payload_bytes = packet_payload_bytes,
+    .ops_per_mac = ops_per_mac,
+  });
+}
