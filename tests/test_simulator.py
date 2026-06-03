@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 import unittest
 
@@ -14,9 +15,18 @@ from wafersim.config import SdkExamplesWorkloadConfig
 from wafersim.config import StencilWorkloadConfig
 from wafersim.csl import CslBuiltins, CslCompatibilityRuntime, Direction
 from wafersim.csl import csl_compat_coverage
-from wafersim.csl import load_csl_example
 from wafersim.hardware.network import WaferMesh, percentile
+from wafersim.program import GemvProblemSpec, build_gemv_streaming_config
 from wafersim.simulator import run_simulation, strip_internal_records
+
+
+def load_module(path: Path, name: str):
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load module from {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 class NetworkTests(unittest.TestCase):
@@ -216,30 +226,22 @@ class SimulatorTests(unittest.TestCase):
         self.assertIn("x_color", workload["color_packets"])
         self.assertGreater(public_summary["csl_gemv_streaming_color_packets"], 0)
 
-    def test_csl_style_gemv_example_files_drive_simulation(self) -> None:
+    def test_python_native_gemv_example_files_drive_simulation(self) -> None:
         example_dir = Path(__file__).resolve().parents[1] / "examples/gemv_09_streaming"
-        program = load_csl_example(example_dir)
+        layout_module = load_module(example_dir / "layout.py", "gemv_layout")
+        pe_program_module = load_module(example_dir / "pe_program.py", "gemv_pe_program")
+        layout = layout_module.LAYOUT
+        pe_program = pe_program_module.PE_PROGRAM
 
-        self.assertEqual(program.kernel, "gemv_09_streaming")
-        self.assertEqual(program.rectangle, ("kernel_rows", "kernel_cols"))
-        self.assertEqual(program.colors["x_color"], Direction.SOUTH)
-        self.assertIn("compute_local_ax", program.tasks)
+        self.assertEqual(pe_program.kernel, "gemv_09_streaming")
+        self.assertEqual((layout.kernel_rows, layout.kernel_cols), (3, 4))
+        self.assertEqual(layout.routes["x_color"], Direction.SOUTH)
+        self.assertIn("compute_local_ax", [task.name for task in pe_program.tasks])
 
         summary = run_simulation(
-            SimulationConfig(
-                mesh=MeshConfig(
-                    rows=program.int_constant("mesh_rows"),
-                    cols=program.int_constant("mesh_cols"),
-                ),
-                workload=CslGemvStreamingWorkloadConfig(
-                    matrix_rows=program.int_constant("matrix_rows"),
-                    matrix_cols=program.int_constant("matrix_cols"),
-                    kernel_rows=program.int_constant("kernel_rows"),
-                    kernel_cols=program.int_constant("kernel_cols"),
-                    bytes_per_element=program.int_constant("bytes_per_element"),
-                    packet_payload_bytes=program.int_constant("packet_payload_bytes"),
-                    ops_per_mac=program.int_constant("ops_per_mac"),
-                ),
+            build_gemv_streaming_config(
+                layout=layout,
+                problem=GemvProblemSpec(matrix_rows=6, matrix_cols=8),
             )
         )
         public_summary = strip_internal_records(summary)

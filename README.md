@@ -47,7 +47,8 @@ Run the CSL GEMV 9 color-streaming pipeline:
 python -m wafersim.cli --config configs/csl_gemv_streaming.json
 ```
 
-Run the same GEMV 9 model from a CSL-style example directory:
+Run the same GEMV 9 model from a Python example directory that mirrors the SDK
+layout / PE program / host launcher flow:
 
 ```bash
 python examples/gemv_09_streaming/run.py
@@ -153,22 +154,22 @@ mapping.
 See `docs/csl_compat_mapping.md` for the implemented, partially implemented,
 and intentionally omitted CSL builtin/library mappings.
 
-## CSL-Style Example Layout
+## Python Example Layout
 
-The simulator also supports a Cerebras SDK-like example structure:
+The simulator also supports a Cerebras SDK-like example structure without
+requiring users to write or compile CSL:
 
 ```text
 examples/gemv_09_streaming/
-  layout.csl       mesh rectangle, color names, and route directions
-  pe_program.csl   PE-local GEMV task declarations
-  run.py           host-side launcher that converts the CSL-style files into
-                   a SimPy SimulationConfig
+  layout.py        mesh rectangle, color names, and route directions
+  pe_program.py    PE-local GEMV task declarations
+  run.py           host-side launcher that converts Python specs into a
+                   SimPy SimulationConfig
 ```
 
-This path preserves the existing Python/SimPy builtins and libraries. The CSL
-files are parsed as structural simulator input; they are not compiled by the
-Cerebras SDK. This makes the dataflow easier to compare with public SDK examples
-while keeping local execution dependent only on Python and SimPy.
+This path preserves the SDK example flow while keeping the simulator Python-only.
+Application developers can define layout and PE tasks with dataclasses instead
+of learning CSL syntax.
 
 ## Current Outputs
 
@@ -185,6 +186,7 @@ The CLI prints:
 ```text
 src/wafersim/
   config.py            simulator and workload parameters
+  program.py           Python-native layout, PE program, and problem specs
   hardware/
     pe.py              processing element timing model
     network.py         mesh, links, routing, packet metrics
@@ -208,8 +210,8 @@ docs/
   hardware_mapping.md
 examples/
   gemv_09_streaming/
-    layout.csl
-    pe_program.csl
+    layout.py
+    pe_program.py
     run.py
 tests/
   test_simulator.py
