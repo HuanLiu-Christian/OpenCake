@@ -1,23 +1,22 @@
 # Hardware Mapping Roadmap
 
-This simulator is intentionally structured around blocks that can become Chisel
-modules later. The first target is not a bit-accurate Cerebras clone; it is a
-wafer-scale, dataflow-style mesh accelerator whose timing model can be refined
-until it is close enough to drive RTL design choices.
+This simulator is structured around Python blocks that can later become Chisel
+or another hardware implementation. The current clean target is the GEMV9-style
+streaming example, not a bit-accurate Cerebras WSE clone.
 
-## Simulator Block To Chisel Block
+## Simulator Block To Hardware Block
 
-| Simulator block | Chisel block | Notes |
+| Simulator block | Future hardware block | Notes |
 | --- | --- | --- |
-| `ProcessingElement` | `ProcessingElement` | Local SRAM, task queue, simple vector/FMA datapath, network interface. |
-| `DirectedLink` | `CreditLink` or ready/valid channel | Current SimPy queue maps naturally to credit-based backpressure. |
-| `WaferMesh.route_xy` | `Router` | Deterministic XY routing first; virtual channels can be added later. |
-| `Packet` | `PacketBundle` | Stable hardware contract: source, destination, opcode, byte count, sequence id. |
-| `StencilWorkload` | Chisel testbench traffic | Packet traces can seed RTL tests and latency comparisons. |
+| `GemvStreamingPeProgram` | PE-local GEMV kernel | Owns local A tile, x input, y buffer, and eastward reduction state. |
+| `ProcessingElement` | PE timing/datapath model | Tracks compute cycles, memory cycles, SRAM footprint, and completed tasks. |
+| `DirectedLink` | Credit link or ready/valid channel | Current SimPy queue maps naturally to link backpressure. |
+| `WaferMesh` | Mesh generator plus routers | Provides coordinates, neighbors, links, routing, and utilization metrics. |
+| `CslCompatibilityRuntime.colors` | Color/routing metadata | Models named communication paths such as `x_color` and `ax_color_1`. |
 
-## Suggested Chisel Interfaces
+## Suggested First RTL Boundary
 
-Keep the first RTL iteration boring and explicit:
+Keep the first hardware contract small:
 
 ```scala
 class Coord(val rowBits: Int, val colBits: Int) extends Bundle {
@@ -28,23 +27,23 @@ class Coord(val rowBits: Int, val colBits: Int) extends Bundle {
 class PacketBundle(rowBits: Int, colBits: Int, payloadBits: Int) extends Bundle {
   val src = new Coord(rowBits, colBits)
   val dst = new Coord(rowBits, colBits)
-  val opcode = UInt(4.W)
+  val color = UInt(8.W)
   val sizeBytes = UInt(16.W)
-  val seq = UInt(32.W)
   val payload = UInt(payloadBits.W)
 }
 ```
 
-Use `Decoupled[PacketBundle]` for router ports first. Once the functionality
-matches the SimPy model, split payload into flits and add credits.
+For the first GEMV mapping, model:
+
+- `x_color`: x chunks stream south through a column.
+- `ax_color_1` / `ax_color_2`: partial y chunks reduce east through a row.
+- H2D/D2H colors: host input and output movement.
+- PE-local memory: A tile, x chunk, and y buffer.
 
 ## Next Milestones
 
-1. Add a packet/flit mode to the SimPy model so queue occupancy and head-of-line
-   blocking are closer to hardware.
-2. Add `--trace-jsonl` workloads as golden traffic for Chisel unit tests.
-3. Implement a single Chisel router and compare packet latency against a small
-   `2x2` or `4x4` SimPy run.
-4. Tile the router into a mesh generator, then add a small PE with SRAM and a
-   command queue.
-
+1. Add flit-level packet modeling to the SimPy links.
+2. Emit packet traces from `examples/gemv_09_streaming/run.py`.
+3. Build a small Chisel router and compare against a `2x2` or `4x4` SimPy run.
+4. Add a simple PE with local SRAM and a GEMV FMA datapath.
+5. Scale the mesh generator after small-router latency and backpressure match.
