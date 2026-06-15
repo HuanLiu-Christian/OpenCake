@@ -10,7 +10,14 @@ import simpy
 from wafersim.config import MeshConfig
 from wafersim.csl import CslBuiltins, CslCompatibilityRuntime, Direction
 from wafersim.csl import csl_compat_coverage
+from wafersim.hardware.local_memcpy import (
+    parse_local_memcpy_trace,
+    run_memcpy_commands,
+    run_local_memcpy_trace,
+)
 from wafersim.hardware.network import WaferMesh, percentile
+from wafersim.mapping import read_memcpy_commands
+from wafersim.mapping.trace_io import command_to_record
 
 
 def load_module(path: Path, name: str):
@@ -108,6 +115,81 @@ class CslCompatibilityTests(unittest.TestCase):
         self.assertIn("<dsd_ops>", coverage["libraries"])
         self.assertIn("@set_tile_code / compiler code placement", coverage["builtins"])
         self.assertIn("omitted", coverage["builtins"]["@set_tile_code / compiler code placement"])
+
+
+class LocalMemcpyMappingTests(unittest.TestCase):
+    def test_example_program_auto_generates_the_checked_in_memcpy_ir(self) -> None:
+        example_dir = Path(__file__).resolve().parents[1] / "examples/pe_local_memcpy"
+        run_module = load_module(example_dir / "run.py", "pe_local_memcpy_run")
+        ir_path = Path(__file__).resolve().parent / "fixtures" / "pe_local_memcpy.jsonl"
+        program = run_module.build_pe_local_memcpy_program()
+
+        self.assertEqual(
+            [command_to_record(command) for command in program.commands],
+            [command_to_record(command) for command in read_memcpy_commands(ir_path)],
+        )
+
+    def test_pe_to_pe_program_auto_generates_and_runs_memcpy_ir(self) -> None:
+        example_dir = Path(__file__).resolve().parents[1] / "examples/pe_to_pe_memcpy"
+        run_module = load_module(example_dir / "run.py", "pe_to_pe_memcpy_run")
+        ir_path = Path(__file__).resolve().parent / "fixtures" / "pe_to_pe_memcpy.jsonl"
+        program = run_module.build_pe_to_pe_memcpy_program()
+        commands = read_memcpy_commands(ir_path)
+        result = run_memcpy_commands(program.commands)
+
+        self.assertEqual(
+            [command_to_record(command) for command in program.commands],
+            [command_to_record(command) for command in commands],
+        )
+        self.assertEqual([command.op for command in commands], [
+            "h2d_write",
+            "p2p_copy",
+            "d2h_read",
+            "expect",
+            "expect",
+            "expect",
+            "expect",
+        ])
+        self.assertEqual(result.final_srams[(0, 0)][4:8], (7, 8, 9, 10))
+        self.assertEqual(result.final_srams[(0, 1)][12:16], (7, 8, 9, 10))
+        self.assertEqual(result.d2h_outputs[0], (7, 8, 9, 10))
+
+    def test_simpy_pe_local_memcpy_command_ir_is_the_mapping_source(self) -> None:
+        ir_path = Path(__file__).resolve().parent / "fixtures" / "pe_local_memcpy.jsonl"
+        commands = read_memcpy_commands(ir_path)
+        result = run_memcpy_commands(commands)
+
+        self.assertEqual(
+            [command.op for command in commands],
+            [
+                "h2d_write",
+                "local_copy",
+                "d2h_read",
+                "expect",
+                "expect",
+                "expect",
+                "expect",
+                "h2d_write",
+                "d2h_read",
+            ],
+        )
+        self.assertEqual(result.d2h_outputs[0], (11, 22, 33, 44))
+        self.assertEqual(result.d2h_outputs[1], (101, 202, 303, 404))
+        self.assertEqual(result.final_sram[20:24], (11, 22, 33, 44))
+        self.assertEqual(result.memory_tasks_completed, 6)
+
+    def test_legacy_text_trace_converts_to_memcpy_command_ir(self) -> None:
+        trace_path = Path(__file__).resolve().parent / "fixtures" / "pe_local_memcpy.trace"
+        ir_path = Path(__file__).resolve().parent / "fixtures" / "pe_local_memcpy.jsonl"
+        steps = parse_local_memcpy_trace(trace_path)
+        commands = read_memcpy_commands(ir_path)
+        result = run_local_memcpy_trace(trace_path)
+
+        self.assertEqual(steps, commands)
+        self.assertEqual(result.d2h_outputs[0], (11, 22, 33, 44))
+        self.assertEqual(result.d2h_outputs[1], (101, 202, 303, 404))
+        self.assertEqual(result.final_sram[20:24], (11, 22, 33, 44))
+        self.assertEqual(result.memory_tasks_completed, 6)
 
 
 class GemvStreamingExampleTests(unittest.TestCase):

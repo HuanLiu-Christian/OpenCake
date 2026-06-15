@@ -1,0 +1,16 @@
+# wafersim PE-local memcpy trace v1
+# format:
+#   h2d dst_addr word...
+#   copy src_addr dst_addr word_count
+#   d2h src_addr expected_word...
+#   expect addr expected_word
+h2d 4 11 22 33 44
+copy 4 20 4
+d2h 20 11 22 33 44
+expect 20 11
+expect 21 22
+expect 22 33
+expect 23 44
+h2d 12 101 202 303 404
+d2h 12 101 202 303 404
+

@@ -13,6 +13,7 @@ streaming example, not a bit-accurate Cerebras WSE clone.
 | `DirectedLink` | Credit link or ready/valid channel | Current SimPy queue maps naturally to link backpressure. |
 | `WaferMesh` | Mesh generator plus routers | Provides coordinates, neighbors, links, routing, and utilization metrics. |
 | `CslCompatibilityRuntime.colors` | Color/routing metadata | Models named communication paths such as `x_color` and `ax_color_1`. |
+| `MemcpyCommand` | Memcpy command interface | Shared mapping IR for PE-local and two-PE memcpy, consumed by SimPy and translated to Chisel opcodes. |
 
 ## Suggested First RTL Boundary
 

@@ -7,3 +7,6 @@ dist/
 build/
 *.egg-info/
 traces/*.jsonl
+chisel/target/
+chisel/project/target/
+chisel/test_run_dir/
