@@ -38,7 +38,10 @@ def command_to_record(command: MemcpyCommand) -> dict[str, object]:
         record["pe"] = _coord_to_record(command.pe)
     if command.op == "p2p_copy":
         record["src_pe"] = _coord_to_record(command.src_pe)
-        record["dst_pe"] = _coord_to_record(command.dst_pe)
+        if command.dst_pe is not None:
+            record["dst_pe"] = _coord_to_record(command.dst_pe)
+        if command.color is not None:
+            record["color"] = command.color
     return record
 
 
@@ -55,7 +58,12 @@ def command_from_record(record: dict[str, object]) -> MemcpyCommand:
         word_count=int(record.get("word_count", 0)),
         pe=_coord_from_record(record.get("pe"), (0, 0)),
         src_pe=_coord_from_record(record.get("src_pe"), (0, 0)),
-        dst_pe=_coord_from_record(record.get("dst_pe"), (0, 0)),
+        dst_pe=(
+            _coord_from_record(record.get("dst_pe"), (0, 0))
+            if "dst_pe" in record
+            else None
+        ),
+        color=(str(record["color"]) if "color" in record else None),
     )
     command.validate()
     return command

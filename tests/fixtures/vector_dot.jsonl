@@ -1,0 +1,16 @@
+{"op":"load_left","pe":[0,0],"words":[1,2,3,4]}
+{"op":"load_right","pe":[0,0],"words":[1,1,1,1]}
+{"op":"load_left","pe":[0,1],"words":[5,6,7,8]}
+{"op":"load_right","pe":[0,1],"words":[1,1,1,1]}
+{"op":"load_left","pe":[0,2],"words":[9,10,11,12]}
+{"op":"load_right","pe":[0,2],"words":[1,1,1,1]}
+{"op":"load_left","pe":[0,3],"words":[13,14,15,16]}
+{"op":"load_right","pe":[0,3],"words":[1,1,1,1]}
+{"op":"compute_dot","pe":[0,0],"word_count":4}
+{"op":"compute_dot","pe":[0,1],"word_count":4}
+{"op":"compute_dot","pe":[0,2],"word_count":4}
+{"op":"compute_dot","pe":[0,3],"word_count":4}
+{"color":"partial_sum_color","dst_pe":[0,1],"op":"reduce_east","src_pe":[0,0]}
+{"color":"partial_sum_color","dst_pe":[0,2],"op":"reduce_east","src_pe":[0,1]}
+{"color":"partial_sum_color","dst_pe":[0,3],"op":"reduce_east","src_pe":[0,2]}
+{"expected":136,"op":"expect","pe":[0,3]}

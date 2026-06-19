@@ -1,5 +1,5 @@
 {"dst_addr":4,"op":"h2d_write","words":[7,8,9,10]}
-{"dst_addr":12,"dst_pe":[0,1],"op":"p2p_copy","src_addr":4,"src_pe":[0,0],"word_count":4}
+{"color":"east_memcpy","dst_addr":12,"op":"p2p_copy","src_addr":4,"src_pe":[0,0],"word_count":4}
 {"op":"d2h_read","pe":[0,1],"src_addr":12,"words":[7,8,9,10]}
 {"op":"expect","pe":[0,1],"src_addr":12,"words":[7]}
 {"op":"expect","pe":[0,1],"src_addr":13,"words":[8]}

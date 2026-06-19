@@ -19,7 +19,8 @@ class MemcpyCommand:
     word_count: int = 0
     pe: Coord = (0, 0)
     src_pe: Coord = (0, 0)
-    dst_pe: Coord = (0, 0)
+    dst_pe: Coord | None = None
+    color: str | None = None
 
     @property
     def effective_word_count(self) -> int:
@@ -36,8 +37,11 @@ class MemcpyCommand:
             "p2p_copy",
         }:
             raise ValueError(f"unknown memcpy op: {self.op}")
-        for coord in (self.pe, self.src_pe, self.dst_pe):
+        for coord in (self.pe, self.src_pe):
             if len(coord) != 2 or coord[0] < 0 or coord[1] < 0:
+                raise ValueError("PE coordinates must be non-negative row/col pairs")
+        if self.dst_pe is not None:
+            if len(self.dst_pe) != 2 or self.dst_pe[0] < 0 or self.dst_pe[1] < 0:
                 raise ValueError("PE coordinates must be non-negative row/col pairs")
         if self.src_addr < 0 or self.dst_addr < 0:
             raise ValueError("addresses must be non-negative")
@@ -50,7 +54,9 @@ class MemcpyCommand:
         if self.op == "p2p_copy":
             if self.word_count <= 0:
                 raise ValueError("p2p_copy needs a positive word_count")
-            if self.src_pe == self.dst_pe:
+            if self.dst_pe is None and not self.color:
+                raise ValueError("p2p_copy needs either dst_pe or color")
+            if self.dst_pe is not None and self.src_pe == self.dst_pe:
                 raise ValueError("p2p_copy needs distinct source and destination PEs")
         if self.op == "d2h_read" and self.effective_word_count <= 0:
             raise ValueError("d2h_read needs expected words or a word_count")
@@ -94,10 +100,12 @@ def local_copy(
 
 def p2p_copy(
     src_pe: Coord,
-    dst_pe: Coord,
     src_addr: int,
     dst_addr: int,
     word_count: int,
+    *,
+    dst_pe: Coord | None = None,
+    color: str | None = None,
 ) -> MemcpyCommand:
     command = MemcpyCommand(
         op="p2p_copy",
@@ -106,6 +114,7 @@ def p2p_copy(
         word_count=word_count,
         src_pe=src_pe,
         dst_pe=dst_pe,
+        color=color,
     )
     command.validate()
     return command
@@ -172,12 +181,21 @@ class MemcpyProgram:
     def p2p_copy(
         self,
         src_pe: Coord,
-        dst_pe: Coord,
         src_addr: int,
         dst_addr: int,
         word_count: int,
+        *,
+        dst_pe: Coord | None = None,
+        color: str | None = None,
     ) -> MemcpyCommand:
-        command = p2p_copy(src_pe, dst_pe, src_addr, dst_addr, word_count)
+        command = p2p_copy(
+            src_pe,
+            src_addr,
+            dst_addr,
+            word_count,
+            dst_pe=dst_pe,
+            color=color,
+        )
         self.commands.append(command)
         return command
 

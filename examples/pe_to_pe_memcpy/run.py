@@ -12,6 +12,12 @@ if str(SRC_ROOT) not in sys.path:
 
 from wafersim.hardware.local_memcpy import run_memcpy_commands
 from wafersim.mapping import MemcpyProgram, write_memcpy_commands
+from wafersim.program import Direction
+
+
+COLOR_ROUTES = {
+    "east_memcpy": Direction.EAST,
+}
 
 
 def build_pe_to_pe_memcpy_program() -> MemcpyProgram:
@@ -21,10 +27,10 @@ def build_pe_to_pe_memcpy_program() -> MemcpyProgram:
     program.h2d_write(4, [7, 8, 9, 10], pe=(0, 0))
     program.p2p_copy(
         src_pe=(0, 0),
-        dst_pe=(0, 1),
         src_addr=4,
         dst_addr=12,
         word_count=4,
+        color="east_memcpy",
     )
     program.d2h_read(12, [7, 8, 9, 10], pe=(0, 1))
     program.expect_word(12, 7, pe=(0, 1))
@@ -51,7 +57,7 @@ def main() -> None:
     commands = program.commands
     if args.ir_out is not None:
         write_memcpy_commands(args.ir_out, commands)
-    result = run_memcpy_commands(commands)
+    result = run_memcpy_commands(commands, color_routes=COLOR_ROUTES)
     print(
         json.dumps(
             {
@@ -60,6 +66,9 @@ def main() -> None:
                     if args.ir_out is not None
                     else "generated in memory"
                 ),
+                "color_routes": {
+                    color: direction.value for color, direction in COLOR_ROUTES.items()
+                },
                 "commands": len(commands),
                 "d2h_outputs": result.d2h_outputs,
                 "memory_tasks_completed": result.memory_tasks_completed,

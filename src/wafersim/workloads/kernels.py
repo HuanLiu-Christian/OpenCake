@@ -26,3 +26,21 @@ def gemv(
 
 def gemv_ops(rows: int, cols: int, ops_per_mac: int = 2) -> int:
     return rows * cols * ops_per_mac
+
+
+def vector_dot(
+    left: list[float],
+    right: list[float],
+) -> float:
+    if len(left) != len(right):
+        raise ValueError("vector lengths must match")
+    return sum(
+        left_value * right_value
+        for left_value, right_value in zip(left, right, strict=True)
+    )
+
+
+def vector_dot_ops(length: int, ops_per_mac: int = 2) -> int:
+    if length <= 0:
+        raise ValueError("vector length must be positive")
+    return length * ops_per_mac

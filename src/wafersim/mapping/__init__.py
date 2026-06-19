@@ -12,6 +12,21 @@ from wafersim.mapping.trace_io import (
     read_memcpy_commands,
     write_memcpy_commands,
 )
+from wafersim.mapping.vector_dot_ir import (
+    VectorDotCommand,
+    VectorDotOp,
+    VectorDotProgram,
+    compute_dot,
+    expect_dot,
+    load_left,
+    load_right,
+    reduce_east,
+)
+from wafersim.mapping.vector_dot_trace_io import (
+    read_vector_dot_commands,
+    vector_dot_command_to_record,
+    write_vector_dot_commands,
+)
 
 __all__ = [
     "MemcpyCommand",
@@ -24,4 +39,15 @@ __all__ = [
     "p2p_copy",
     "read_memcpy_commands",
     "write_memcpy_commands",
+    "VectorDotCommand",
+    "VectorDotOp",
+    "VectorDotProgram",
+    "compute_dot",
+    "expect_dot",
+    "load_left",
+    "load_right",
+    "reduce_east",
+    "read_vector_dot_commands",
+    "vector_dot_command_to_record",
+    "write_vector_dot_commands",
 ]

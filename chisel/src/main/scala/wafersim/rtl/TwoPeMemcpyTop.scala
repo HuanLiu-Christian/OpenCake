@@ -41,7 +41,7 @@ class TwoPeMemcpyTop(
   private val (sIdle :: sIssue :: sStream :: sDone :: Nil) = Enum(4)
   private val state = RegInit(sIdle)
   private val srcPeReg = RegInit(0.U(peBits.W))
-  private val dstPeReg = RegInit(0.U(peBits.W))
+  private val directionReg = RegInit(MemcpyDirection.east)
   private val srcAddrReg = RegInit(0.U(addrBits.W))
   private val dstAddrReg = RegInit(0.U(addrBits.W))
   private val bytesReg = RegInit(0.U(lenBits.W))
@@ -52,7 +52,7 @@ class TwoPeMemcpyTop(
 
   private val p2pActive = state =/= sIdle
   private val srcIsPe0 = srcPeReg === 0.U
-  private val dstIsPe0 = dstPeReg === 0.U
+  private val dstIsPe0 = !srcIsPe0 && directionReg === MemcpyDirection.west
 
   private val pe0CmdBits = Wire(new MemcpyCmd(addrBits, lenBits))
   private val pe1CmdBits = Wire(new MemcpyCmd(addrBits, lenBits))
@@ -153,7 +153,7 @@ class TwoPeMemcpyTop(
 
   when(io.p2pCmd.fire) {
     srcPeReg := io.p2pCmd.bits.srcPe
-    dstPeReg := io.p2pCmd.bits.dstPe
+    directionReg := io.p2pCmd.bits.routeDir
     srcAddrReg := io.p2pCmd.bits.srcAddr
     dstAddrReg := io.p2pCmd.bits.dstAddr
     bytesReg := io.p2pCmd.bits.bytes

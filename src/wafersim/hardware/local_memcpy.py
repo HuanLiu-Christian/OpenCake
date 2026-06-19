@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Mapping
 
 import simpy
 
@@ -16,6 +17,43 @@ from wafersim.mapping.memcpy_ir import (
 )
 
 LocalMemcpyStep = MemcpyCommand
+
+ColorRoutes = Mapping[str, str | object]
+
+
+def _direction_name(direction: str | object) -> str:
+    return getattr(direction, "value", str(direction)).lower()
+
+
+def _move_by_direction(coord: Coord, direction: str | object) -> Coord:
+    row, col = coord
+    match _direction_name(direction):
+        case "north":
+            return (row - 1, col)
+        case "south":
+            return (row + 1, col)
+        case "west":
+            return (row, col - 1)
+        case "east":
+            return (row, col + 1)
+        case other:
+            raise ValueError(f"unsupported memcpy color direction: {other}")
+
+
+def _resolve_p2p_dst(command: MemcpyCommand, color_routes: ColorRoutes) -> Coord:
+    if command.color is None:
+        if command.dst_pe is None:
+            raise ValueError("p2p_copy needs dst_pe when no color is provided")
+        return command.dst_pe
+    if command.color not in color_routes:
+        raise ValueError(f"missing route direction for memcpy color: {command.color}")
+    routed_dst = _move_by_direction(command.src_pe, color_routes[command.color])
+    if command.dst_pe is not None and command.dst_pe != routed_dst:
+        raise ValueError(
+            f"p2p_copy color {command.color} routes to {routed_dst}, "
+            f"but command dst_pe is {command.dst_pe}"
+        )
+    return routed_dst
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,10 +197,12 @@ def run_memcpy_commands(
     *,
     depth_words: int = 64,
     word_bytes: int = 4,
+    color_routes: ColorRoutes | None = None,
 ) -> LocalMemcpyResult:
     env = simpy.Environment()
     models: dict[Coord, LocalMemcpyPe] = {}
     d2h_outputs: list[tuple[int, ...]] = []
+    routes = color_routes or {}
 
     def _model(coord: Coord) -> LocalMemcpyPe:
         if coord not in models:
@@ -178,7 +218,7 @@ def run_memcpy_commands(
         for command in commands:
             if command.op == "p2p_copy":
                 src_model = _model(command.src_pe)
-                dst_model = _model(command.dst_pe)
+                dst_model = _model(_resolve_p2p_dst(command, routes))
                 payload = yield env.process(
                     src_model.d2h_read(command.src_addr, command.word_count)
                 )

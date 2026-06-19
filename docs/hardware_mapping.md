@@ -13,7 +13,7 @@ streaming example, not a bit-accurate Cerebras WSE clone.
 | `DirectedLink` | Credit link or ready/valid channel | Current SimPy queue maps naturally to link backpressure. |
 | `WaferMesh` | Mesh generator plus routers | Provides coordinates, neighbors, links, routing, and utilization metrics. |
 | `CslCompatibilityRuntime.colors` | Color/routing metadata | Models named communication paths such as `x_color` and `ax_color_1`. |
-| `MemcpyCommand` | Memcpy command interface | Shared mapping IR for PE-local and two-PE memcpy, consumed by SimPy and translated to Chisel opcodes. |
+| `MemcpyCommand` | Memcpy command interface | Shared mapping IR for PE-local and color-routed two-PE memcpy, consumed by SimPy and translated to Chisel opcodes/directions. |
 
 ## Suggested First RTL Boundary
 
@@ -39,6 +39,8 @@ For the first GEMV mapping, model:
 - `x_color`: x chunks stream south through a column.
 - `ax_color_1` / `ax_color_2`: partial y chunks reduce east through a row.
 - H2D/D2H colors: host input and output movement.
+- `east_memcpy`: prototype p2p memcpy color that routes one hop east in the
+  two-PE Chisel mapping.
 - PE-local memory: A tile, x chunk, and y buffer.
 
 ## Next Milestones

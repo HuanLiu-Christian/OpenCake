@@ -15,9 +15,11 @@ from wafersim.hardware.local_memcpy import (
     run_memcpy_commands,
     run_local_memcpy_trace,
 )
+from wafersim.hardware.vector_dot import run_vector_dot_commands
 from wafersim.hardware.network import WaferMesh, percentile
-from wafersim.mapping import read_memcpy_commands
+from wafersim.mapping import read_memcpy_commands, read_vector_dot_commands
 from wafersim.mapping.trace_io import command_to_record
+from wafersim.mapping.vector_dot_trace_io import vector_dot_command_to_record
 
 
 def load_module(path: Path, name: str):
@@ -135,7 +137,10 @@ class LocalMemcpyMappingTests(unittest.TestCase):
         ir_path = Path(__file__).resolve().parent / "fixtures" / "pe_to_pe_memcpy.jsonl"
         program = run_module.build_pe_to_pe_memcpy_program()
         commands = read_memcpy_commands(ir_path)
-        result = run_memcpy_commands(program.commands)
+        result = run_memcpy_commands(
+            program.commands,
+            color_routes=run_module.COLOR_ROUTES,
+        )
 
         self.assertEqual(
             [command_to_record(command) for command in program.commands],
@@ -150,6 +155,8 @@ class LocalMemcpyMappingTests(unittest.TestCase):
             "expect",
             "expect",
         ])
+        self.assertEqual(commands[1].color, "east_memcpy")
+        self.assertIsNone(commands[1].dst_pe)
         self.assertEqual(result.final_srams[(0, 0)][4:8], (7, 8, 9, 10))
         self.assertEqual(result.final_srams[(0, 1)][12:16], (7, 8, 9, 10))
         self.assertEqual(result.d2h_outputs[0], (7, 8, 9, 10))
@@ -220,6 +227,83 @@ class GemvStreamingExampleTests(unittest.TestCase):
         self.assertEqual(workload["color_directions"]["ax_color_1"], "east")
         self.assertIn("x_color", workload["color_packets"])
         self.assertGreater(summary["gemv_09_streaming_color_packets"], 0)
+
+
+class VectorDotExampleTests(unittest.TestCase):
+    def test_vector_dot_program_auto_generates_and_runs_compute_ir(self) -> None:
+        example_dir = Path(__file__).resolve().parents[1] / "examples/vector_vector_dot"
+        run_module = load_module(example_dir / "run.py", "vector_dot_ir_run")
+        ir_path = Path(__file__).resolve().parent / "fixtures" / "vector_dot.jsonl"
+
+        program = run_module.build_vector_dot_program(
+            list(range(1, 17)),
+            [1 for _ in range(16)],
+        )
+        commands = read_vector_dot_commands(ir_path)
+        result = run_vector_dot_commands(commands)
+
+        self.assertEqual(
+            [vector_dot_command_to_record(command) for command in program.commands],
+            [vector_dot_command_to_record(command) for command in commands],
+        )
+        self.assertEqual([command.op for command in commands], [
+            "load_left",
+            "load_right",
+            "load_left",
+            "load_right",
+            "load_left",
+            "load_right",
+            "load_left",
+            "load_right",
+            "compute_dot",
+            "compute_dot",
+            "compute_dot",
+            "compute_dot",
+            "reduce_east",
+            "reduce_east",
+            "reduce_east",
+            "expect",
+        ])
+        self.assertEqual(result.pe_results[(0, 0)], 10)
+        self.assertEqual(result.pe_results[(0, 1)], 36)
+        self.assertEqual(result.pe_results[(0, 2)], 78)
+        self.assertEqual(result.pe_results[(0, 3)], 136)
+        self.assertEqual(result.result, 136)
+        self.assertEqual(result.expected, 136)
+        self.assertEqual(result.compute_tasks_completed, 4)
+        self.assertEqual(result.memory_tasks_completed, 14)
+
+    def test_vector_dot_example_files_drive_simulation(self) -> None:
+        example_dir = Path(__file__).resolve().parents[1] / "examples/vector_vector_dot"
+        layout_module = load_module(example_dir / "layout.py", "vector_dot_layout")
+        pe_program_module = load_module(example_dir / "pe_program.py", "vector_dot_pe_program")
+        sys.modules.pop("layout", None)
+        sys.modules.pop("pe_program", None)
+        run_module = load_module(example_dir / "run.py", "vector_dot_run")
+        layout = layout_module.LAYOUT
+        pe_program = pe_program_module.PE_PROGRAM
+
+        self.assertEqual(pe_program.kernel, "vector_vector_dot")
+        self.assertEqual((layout.kernel_rows, layout.kernel_cols), (1, 4))
+        self.assertEqual(layout.routes["partial_sum_color"], Direction.EAST)
+        self.assertIn("compute_local_dot", [task.name for task in pe_program.tasks])
+        self.assertTrue(hasattr(pe_program_module, "VectorDotPeProgram"))
+
+        summary = run_module.run_vector_dot(
+            layout=layout,
+            config=pe_program_module.VectorDotConfig(vector_length=16, kernel_cols=4),
+        )
+        workload = summary["workload"]
+
+        self.assertEqual(workload["type"], "vector_vector_dot_example")
+        self.assertTrue(workload["verified"])
+        self.assertEqual(workload["result_dot"], 136.0)
+        self.assertEqual(workload["expected_dot"], 136.0)
+        self.assertEqual(workload["local_partials"]["(0, 0)"], 10.0)
+        self.assertEqual(workload["local_partials"]["(0, 3)"], 58.0)
+        self.assertEqual(workload["color_directions"]["partial_sum_color"], "east")
+        self.assertEqual(workload["color_packets"]["partial_sum_color"], 3)
+        self.assertGreater(summary["vector_dot_ops_per_cycle"], 0.0)
 
 
 if __name__ == "__main__":

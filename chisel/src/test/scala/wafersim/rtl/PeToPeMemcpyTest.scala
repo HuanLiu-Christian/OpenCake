@@ -14,7 +14,7 @@ class PeToPeMemcpyTest extends AnyFlatSpec with ChiselScalatestTester with Match
   private case class H2d(pe: Int, dstAddr: Int, words: Seq[BigInt]) extends IrStep
   private case class P2p(
       srcPe: Int,
-      dstPe: Int,
+      direction: Int,
       srcAddr: Int,
       dstAddr: Int,
       wordCount: Int
@@ -33,6 +33,21 @@ class PeToPeMemcpyTest extends AnyFlatSpec with ChiselScalatestTester with Match
       .findFirstMatchIn(line)
       .map(_.group(1))
       .getOrElse(throw new IllegalArgumentException(s"missing string field: $key"))
+  }
+
+  private val colorDirections = Map(
+    "north_memcpy" -> 0,
+    "south_memcpy" -> 1,
+    "west_memcpy" -> 2,
+    "east_memcpy" -> 3,
+  )
+
+  private def directionFromColor(line: String): Int = {
+    val color = stringField(line, "color")
+    colorDirections.getOrElse(
+      color,
+      throw new IllegalArgumentException(s"unknown memcpy color route: $color"),
+    )
   }
 
   private def wordsField(line: String): Seq[BigInt] = {
@@ -80,7 +95,7 @@ class PeToPeMemcpyTest extends AnyFlatSpec with ChiselScalatestTester with Match
             case "p2p_copy" =>
               P2p(
                 peField(line, "src_pe"),
-                peField(line, "dst_pe"),
+                directionFromColor(line),
                 intField(line, "src_addr"),
                 intField(line, "dst_addr"),
                 intField(line, "word_count"),
@@ -170,14 +185,14 @@ class PeToPeMemcpyTest extends AnyFlatSpec with ChiselScalatestTester with Match
   private def sendP2pCmd(
       dut: TwoPeMemcpyTop,
       srcPe: Int,
-      dstPe: Int,
+      direction: Int,
       srcAddr: Int,
       dstAddr: Int,
       bytes: Int
   ): Unit = {
     dut.io.p2pCmd.valid.poke(true.B)
     dut.io.p2pCmd.bits.srcPe.poke(srcPe.U)
-    dut.io.p2pCmd.bits.dstPe.poke(dstPe.U)
+    dut.io.p2pCmd.bits.routeDir.poke(direction.U)
     dut.io.p2pCmd.bits.srcAddr.poke(srcAddr.U)
     dut.io.p2pCmd.bits.dstAddr.poke(dstAddr.U)
     dut.io.p2pCmd.bits.bytes.poke(bytes.U)
@@ -218,11 +233,11 @@ class PeToPeMemcpyTest extends AnyFlatSpec with ChiselScalatestTester with Match
             )
             writeHostWords(dut, pe, words)
             waitHostDone(dut, pe)
-          case P2p(srcPe, dstPe, srcAddr, dstAddr, wordCount) =>
+          case P2p(srcPe, direction, srcAddr, dstAddr, wordCount) =>
             sendP2pCmd(
               dut,
               srcPe,
-              dstPe,
+              direction,
               srcAddr = srcAddr,
               dstAddr = dstAddr,
               bytes = wordCount * 4,
