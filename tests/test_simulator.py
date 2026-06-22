@@ -15,9 +15,11 @@ from wafersim.hardware.local_memcpy import (
     run_memcpy_commands,
     run_local_memcpy_trace,
 )
+from wafersim.hardware.gemv import run_gemv_commands
 from wafersim.hardware.vector_dot import run_vector_dot_commands
 from wafersim.hardware.network import WaferMesh, percentile
-from wafersim.mapping import read_memcpy_commands, read_vector_dot_commands
+from wafersim.mapping import read_gemv_commands, read_memcpy_commands, read_vector_dot_commands
+from wafersim.mapping.gemv_trace_io import gemv_command_to_record
 from wafersim.mapping.trace_io import command_to_record
 from wafersim.mapping.vector_dot_trace_io import vector_dot_command_to_record
 
@@ -200,10 +202,53 @@ class LocalMemcpyMappingTests(unittest.TestCase):
 
 
 class GemvStreamingExampleTests(unittest.TestCase):
+    def test_gemv_program_auto_generates_and_runs_cross_pe_ir(self) -> None:
+        example_dir = Path(__file__).resolve().parents[1] / "examples/gemv_09_streaming"
+        sys.modules.pop("layout", None)
+        sys.modules.pop("pe_program", None)
+        run_module = load_module(example_dir / "run.py", "gemv_ir_run")
+        ir_path = Path(__file__).resolve().parent / "fixtures" / "gemv_09_streaming.jsonl"
+        config = run_module.GemvStreamingConfig(
+            matrix_rows=6,
+            matrix_cols=8,
+            kernel_rows=3,
+            kernel_cols=4,
+            bytes_per_element=4,
+            packet_payload_bytes=64,
+            ops_per_mac=2,
+        )
+        matrix = [index for index in range(config.matrix_rows * config.matrix_cols)]
+        vector = [1 for _ in range(config.matrix_cols)]
+        bias = [2 for _ in range(config.matrix_rows)]
+
+        program = run_module.build_gemv_program(config, matrix, vector, bias)
+        commands = read_gemv_commands(ir_path)
+        result = run_gemv_commands(commands, ops_per_mac=config.ops_per_mac)
+
+        self.assertEqual(
+            [gemv_command_to_record(command) for command in program.commands],
+            [gemv_command_to_record(command) for command in commands],
+        )
+        self.assertEqual(
+            [command.op for command in commands],
+            (["load_a_tile"] * 12)
+            + (["load_x_chunk"] + ["forward_x_south"] * 2) * 4
+            + (["load_bias"] * 3)
+            + (["compute_ax"] * 12)
+            + (["reduce_east"] * 9)
+            + (["expect_y"] * 3),
+        )
+        self.assertEqual(result.result_y, (30, 94, 158, 222, 286, 350))
+        self.assertEqual(result.expected_y, (30, 94, 158, 222, 286, 350))
+        self.assertEqual(result.compute_tasks_completed, 12)
+        self.assertEqual(result.memory_tasks_completed, 53)
+
     def test_python_native_gemv_example_files_drive_simulation(self) -> None:
         example_dir = Path(__file__).resolve().parents[1] / "examples/gemv_09_streaming"
         layout_module = load_module(example_dir / "layout.py", "gemv_layout")
         pe_program_module = load_module(example_dir / "pe_program.py", "gemv_pe_program")
+        sys.modules.pop("layout", None)
+        sys.modules.pop("pe_program", None)
         run_module = load_module(example_dir / "run.py", "gemv_run")
         layout = layout_module.LAYOUT
         pe_program = pe_program_module.PE_PROGRAM

@@ -18,7 +18,9 @@ from pe_program import PE_PROGRAM, GemvStreamingConfig, GemvStreamingPeProgram
 from wafersim.config import MeshConfig
 from wafersim.config import Coord
 from wafersim.csl import CslBuiltins, CslCompatibilityRuntime
+from wafersim.hardware.gemv import run_gemv_commands
 from wafersim.hardware.network import WaferMesh
+from wafersim.mapping import GemvProgram, write_gemv_commands
 from wafersim.program import GemvProblemSpec, LayoutSpec
 from wafersim.workloads.kernels import gemv
 
@@ -41,6 +43,11 @@ def main() -> None:
         action="store_true",
         help="print full expected_y/result_y vectors instead of compact samples",
     )
+    parser.add_argument(
+        "--ir-out",
+        type=Path,
+        help="Optional path for the generated multi-PE GEMV JSONL IR.",
+    )
     args = parser.parse_args()
 
     layout = apply_layout_overrides(LAYOUT, args)
@@ -52,6 +59,28 @@ def main() -> None:
         ops_per_mac=args.ops_per_mac or 2,
     )
     summary = run_gemv_streaming(layout=layout, problem=problem)
+    if args.ir_out is not None:
+        config = GemvStreamingConfig(
+            matrix_rows=problem.matrix_rows,
+            matrix_cols=problem.matrix_cols,
+            kernel_rows=layout.kernel_rows,
+            kernel_cols=layout.kernel_cols,
+            bytes_per_element=problem.bytes_per_element,
+            packet_payload_bytes=problem.packet_payload_bytes,
+            ops_per_mac=problem.ops_per_mac,
+        )
+        matrix = [index for index in range(config.matrix_rows * config.matrix_cols)]
+        vector = [1 for _ in range(config.matrix_cols)]
+        bias = [2 for _ in range(config.matrix_rows)]
+        program = build_gemv_program(config, matrix, vector, bias)
+        write_gemv_commands(args.ir_out, program.commands)
+        golden = run_gemv_commands(program.commands, ops_per_mac=config.ops_per_mac)
+        summary["generated_ir"] = str(args.ir_out)
+        summary["mapping"] = {
+            "ir_type": "gemv_jsonl",
+            "simpy_golden_result_y": list(golden.result_y),
+            "chisel_target": "GemvArrayTop",
+        }
     if not args.full_vectors:
         compact_vectors(summary)
     summary["program"] = {
@@ -66,6 +95,93 @@ def main() -> None:
         "tasks": [task.name for task in PE_PROGRAM.tasks],
     }
     print(json.dumps(summary, indent=2, sort_keys=True))
+
+
+def build_gemv_program(
+    config: GemvStreamingConfig,
+    matrix: list[int],
+    vector: list[int],
+    bias: list[int],
+) -> GemvProgram:
+    config.validate()
+    if len(matrix) != config.matrix_rows * config.matrix_cols:
+        raise ValueError("matrix length does not match GEMV dimensions")
+    if len(vector) != config.matrix_cols:
+        raise ValueError("vector length does not match matrix_cols")
+    if len(bias) != config.matrix_rows:
+        raise ValueError("bias length does not match matrix_rows")
+
+    program = GemvProgram()
+
+    for row in range(config.kernel_rows):
+        for col in range(config.kernel_cols):
+            program.load_a_tile(
+                (row, col),
+                local_a_tile_values(config, matrix, row, col),
+                rows=config.rows_per_pe,
+                cols=config.cols_per_pe,
+            )
+
+    for col in range(config.kernel_cols):
+        start = col * config.cols_per_pe
+        stop = start + config.cols_per_pe
+        program.load_x_chunk((0, col), vector[start:stop])
+        for row in range(config.kernel_rows - 1):
+            program.forward_x_south(
+                src_pe=(row, col),
+                dst_pe=(row + 1, col),
+                color="x_color",
+            )
+
+    for row in range(config.kernel_rows):
+        start = row * config.rows_per_pe
+        stop = start + config.rows_per_pe
+        program.load_bias((row, 0), bias[start:stop])
+
+    for row in range(config.kernel_rows):
+        for col in range(config.kernel_cols):
+            program.compute_ax(
+                (row, col),
+                rows=config.rows_per_pe,
+                cols=config.cols_per_pe,
+            )
+
+    for row in range(config.kernel_rows):
+        for col in range(config.kernel_cols - 1):
+            program.reduce_east(
+                src_pe=(row, col),
+                dst_pe=(row, col + 1),
+                color="ax_color_1" if col % 2 == 0 else "ax_color_2",
+            )
+
+    expected = gemv(
+        [float(value) for value in matrix],
+        [float(value) for value in vector],
+        [float(value) for value in bias],
+        config.matrix_rows,
+        config.matrix_cols,
+    )
+    for row in range(config.kernel_rows):
+        start = row * config.rows_per_pe
+        stop = start + config.rows_per_pe
+        program.expect_y((row, config.kernel_cols - 1), [int(value) for value in expected[start:stop]])
+    return program
+
+
+def local_a_tile_values(
+    config: GemvStreamingConfig,
+    matrix: list[int],
+    row: int,
+    col: int,
+) -> list[int]:
+    row0 = row * config.rows_per_pe
+    col0 = col * config.cols_per_pe
+    values: list[int] = []
+    for local_row in range(config.rows_per_pe):
+        global_row = row0 + local_row
+        start = global_row * config.matrix_cols + col0
+        values.extend(matrix[start : start + config.cols_per_pe])
+    return values
 
 
 def apply_layout_overrides(

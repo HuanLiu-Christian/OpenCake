@@ -1,3 +1,13 @@
+from wafersim.mapping.gemv_ir import (
+    GemvCommand,
+    GemvOp,
+    GemvProgram,
+)
+from wafersim.mapping.gemv_trace_io import (
+    gemv_command_to_record,
+    read_gemv_commands,
+    write_gemv_commands,
+)
 from wafersim.mapping.memcpy_ir import (
     MemcpyCommand,
     MemcpyOp,
@@ -32,6 +42,12 @@ __all__ = [
     "MemcpyCommand",
     "MemcpyOp",
     "MemcpyProgram",
+    "GemvCommand",
+    "GemvOp",
+    "GemvProgram",
+    "gemv_command_to_record",
+    "read_gemv_commands",
+    "write_gemv_commands",
     "d2h_read",
     "expect_word",
     "h2d_write",

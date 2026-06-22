@@ -67,6 +67,14 @@ python examples/gemv_09_streaming/run.py \
   --kernel-cols 32
 ```
 
+Generate a multi-PE GEMV command IR for Chisel replay:
+
+```bash
+python examples/gemv_09_streaming/run.py --ir-out /tmp/gemv_09_streaming.jsonl
+cd chisel
+WAFERSIM_GEMV_IR=/tmp/gemv_09_streaming.jsonl sbt test
+```
+
 Run tests:
 
 ```bash
@@ -118,10 +126,13 @@ src/wafersim/
   mapping/
     memcpy_ir.py       portable memcpy command IR and program builder API
     trace_io.py        JSONL serialization for mapping commands
+    gemv_ir.py         portable multi-PE GEMV command IR
+    gemv_trace_io.py   JSONL serialization for GEMV commands
     vector_dot_ir.py   portable multi-PE vector-dot command IR
     vector_dot_trace_io.py
                       JSONL serialization for vector-dot commands
   hardware/
+    gemv.py            SimPy multi-PE GEMV golden model
     local_memcpy.py    SimPy PE SRAM memcpy golden model, including color p2p
     vector_dot.py      SimPy multi-PE vector-dot golden model
     pe.py              PE compute and memory timing model
@@ -135,6 +146,7 @@ tests/
   fixtures/
     pe_local_memcpy.jsonl    shared SimPy/Chisel PE-local memcpy command IR
     pe_to_pe_memcpy.jsonl    shared SimPy/Chisel PE-to-PE memcpy command IR
+    gemv_09_streaming.jsonl  shared SimPy/Chisel multi-PE GEMV IR
     vector_dot.jsonl         shared SimPy/Chisel multi-PE vector-dot IR
     pe_local_memcpy.trace    legacy text trace, converted into command IR
   test_simulator.py
@@ -142,11 +154,14 @@ chisel/
   src/main/scala/wafersim/rtl/
     PeMemcpyEngine.scala     PE-local memcpy FSM and SRAM
     TwoPeMemcpyTop.scala     two-PE p2p memcpy controller and datapath
+    GemvPeEngine.scala       PE-local GEMV tile compute engine
+    GemvArrayTop.scala       multi-PE GEMV array with x south / y east commands
     VectorDotEngine.scala    PE-local vector dot FSM and SRAM
     VectorDotRowTop.scala    multi-PE row wrapper with east reduction
     ProcessingElement.scala  PE wrapper around the memcpy engine
   src/test/scala/wafersim/rtl/
     PeMemcpyEngineTest.scala Chisel tests plus SimPy trace replay
+    GemvArrayTopTest.scala   Chisel multi-PE GEMV IR replay test
     PeToPeMemcpyTest.scala   Chisel two-PE p2p replay test
     VectorDotEngineTest.scala
                             Chisel PE-local and multi-PE vector-dot IR tests
@@ -163,6 +178,8 @@ chisel/
 - GEMV9-style streaming with PE-local tasks running concurrently in SimPy.
 - Chisel RTL mappings for PE-local memcpy and a two-PE color-routed memcpy path
   using the same portable command IR as the SimPy golden model.
+- A multi-PE GEMV mapping: SimPy emits load, x-south, compute, y-east reduce,
+  and expect commands; Chisel replays the same JSONL IR against `GemvArrayTop`.
 - A multi-PE vector dot mapping: PE-local dot engines plus eastward partial-sum
   reduction using the same SimPy/Chisel JSONL command IR.
 
