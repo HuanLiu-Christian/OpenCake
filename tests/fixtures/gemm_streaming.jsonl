@@ -1,0 +1,16 @@
+{"k": 4, "op": "load_a_panel", "pe": [0, 0], "rows": 2, "values": [0, 1, 2, 3, 4, 5, 6, 7]}
+{"color": "a_color", "dst_pe": [0, 1], "op": "forward_a_east", "src_pe": [0, 0]}
+{"k": 4, "op": "load_a_panel", "pe": [1, 0], "rows": 2, "values": [8, 9, 10, 11, 12, 13, 14, 15]}
+{"color": "a_color", "dst_pe": [1, 1], "op": "forward_a_east", "src_pe": [1, 0]}
+{"cols": 2, "k": 4, "op": "load_b_panel", "pe": [0, 0], "values": [1, 1, 1, 1, 1, 1, 1, 1]}
+{"color": "b_color", "dst_pe": [1, 0], "op": "forward_b_south", "src_pe": [0, 0]}
+{"cols": 2, "k": 4, "op": "load_b_panel", "pe": [0, 1], "values": [1, 1, 1, 1, 1, 1, 1, 1]}
+{"color": "b_color", "dst_pe": [1, 1], "op": "forward_b_south", "src_pe": [0, 1]}
+{"cols": 2, "k": 4, "op": "compute_c", "pe": [0, 0], "rows": 2}
+{"cols": 2, "k": 4, "op": "compute_c", "pe": [0, 1], "rows": 2}
+{"cols": 2, "k": 4, "op": "compute_c", "pe": [1, 0], "rows": 2}
+{"cols": 2, "k": 4, "op": "compute_c", "pe": [1, 1], "rows": 2}
+{"cols": 2, "expected": [6, 6, 22, 22], "op": "expect_c", "pe": [0, 0], "rows": 2}
+{"cols": 2, "expected": [6, 6, 22, 22], "op": "expect_c", "pe": [0, 1], "rows": 2}
+{"cols": 2, "expected": [38, 38, 54, 54], "op": "expect_c", "pe": [1, 0], "rows": 2}
+{"cols": 2, "expected": [38, 38, 54, 54], "op": "expect_c", "pe": [1, 1], "rows": 2}

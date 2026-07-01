@@ -41,3 +41,13 @@ class GemvProblemSpec:
     bytes_per_element: int = 4
     packet_payload_bytes: int = 64
     ops_per_mac: int = 2
+
+
+@dataclass(frozen=True, slots=True)
+class GemmProblemSpec:
+    m: int
+    n: int
+    k: int
+    bytes_per_element: int = 4
+    packet_payload_bytes: int = 64
+    ops_per_mac: int = 2

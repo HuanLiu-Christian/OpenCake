@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
+import subprocess
 import sys
 import unittest
 
@@ -15,13 +17,31 @@ from wafersim.hardware.local_memcpy import (
     run_memcpy_commands,
     run_local_memcpy_trace,
 )
+from wafersim.hardware.gemm import run_gemm_commands
 from wafersim.hardware.gemv import run_gemv_commands
 from wafersim.hardware.vector_dot import run_vector_dot_commands
 from wafersim.hardware.network import WaferMesh, percentile
-from wafersim.mapping import read_gemv_commands, read_memcpy_commands, read_vector_dot_commands
+from wafersim.mapping import (
+    read_gemm_commands,
+    read_gemv_commands,
+    read_memcpy_commands,
+    read_vector_dot_commands,
+)
+from wafersim.mapping.gemm_trace_io import gemm_command_to_record
 from wafersim.mapping.gemv_trace_io import gemv_command_to_record
 from wafersim.mapping.trace_io import command_to_record
 from wafersim.mapping.vector_dot_trace_io import vector_dot_command_to_record
+from wafersim.opencake import (
+    ChakraTrace,
+    GemmWorkload,
+    HardwareSpec,
+    OpenCakeBackend,
+    OpenCakeMapper,
+    run_chakra_to_wafer_sim,
+    run_formal_opencake_pipeline,
+    validate_spatial_program,
+    write_gemm_et_trace,
+)
 
 
 def load_module(path: Path, name: str):
@@ -36,6 +56,14 @@ def load_module(path: Path, name: str):
     finally:
         sys.path.pop(0)
     return module
+
+
+def protobuf_available() -> bool:
+    try:
+        import google.protobuf  # noqa: F401
+    except ImportError:
+        return False
+    return True
 
 
 class NetworkTests(unittest.TestCase):
@@ -274,6 +302,83 @@ class GemvStreamingExampleTests(unittest.TestCase):
         self.assertGreater(summary["gemv_09_streaming_color_packets"], 0)
 
 
+class GemmStreamingExampleTests(unittest.TestCase):
+    def test_gemm_program_auto_generates_and_runs_cross_pe_ir(self) -> None:
+        example_dir = Path(__file__).resolve().parents[1] / "examples/gemm_streaming"
+        sys.modules.pop("layout", None)
+        sys.modules.pop("pe_program", None)
+        run_module = load_module(example_dir / "run.py", "gemm_ir_run")
+        ir_path = Path(__file__).resolve().parent / "fixtures" / "gemm_streaming.jsonl"
+        config = run_module.GemmStreamingConfig(
+            m=4,
+            n=4,
+            k=4,
+            kernel_rows=2,
+            kernel_cols=2,
+            bytes_per_element=4,
+            packet_payload_bytes=64,
+            ops_per_mac=2,
+        )
+        left = [index for index in range(config.m * config.k)]
+        right = [1 for _ in range(config.k * config.n)]
+
+        program = run_module.build_gemm_program(config, left, right)
+        commands = read_gemm_commands(ir_path)
+        result = run_gemm_commands(
+            commands,
+            ops_per_mac=config.ops_per_mac,
+            kernel_cols=config.kernel_cols,
+        )
+
+        self.assertEqual(
+            [gemm_command_to_record(command) for command in program.commands],
+            [gemm_command_to_record(command) for command in commands],
+        )
+        self.assertEqual([command.op for command in commands], [
+            "load_a_panel",
+            "forward_a_east",
+            "load_a_panel",
+            "forward_a_east",
+            "load_b_panel",
+            "forward_b_south",
+            "load_b_panel",
+            "forward_b_south",
+            "compute_c",
+            "compute_c",
+            "compute_c",
+            "compute_c",
+            "expect_c",
+            "expect_c",
+            "expect_c",
+            "expect_c",
+        ])
+        self.assertEqual(result.c_tiles[(0, 0)], (6, 6, 22, 22))
+        self.assertEqual(result.c_tiles[(1, 1)], (38, 38, 54, 54))
+        self.assertEqual(result.compute_tasks_completed, 4)
+        self.assertEqual(result.memory_tasks_completed, 12)
+
+    def test_python_native_gemm_example_files_drive_simulation(self) -> None:
+        example_dir = Path(__file__).resolve().parents[1] / "examples/gemm_streaming"
+        layout_module = load_module(example_dir / "layout.py", "gemm_layout")
+        pe_program_module = load_module(example_dir / "pe_program.py", "gemm_pe_program")
+        sys.modules.pop("layout", None)
+        sys.modules.pop("pe_program", None)
+        run_module = load_module(example_dir / "run.py", "gemm_run")
+
+        summary = run_module.run_gemm_streaming(
+            layout=layout_module.LAYOUT,
+            problem=run_module.GemmProblemSpec(m=4, n=4, k=4),
+        )
+
+        self.assertEqual(pe_program_module.PE_PROGRAM.kernel, "gemm_streaming")
+        self.assertEqual(summary["type"], "gemm_streaming_example")
+        self.assertTrue(summary["verified"])
+        self.assertEqual(summary["program"]["colors"]["a_color"], "east")
+        self.assertEqual(summary["program"]["colors"]["b_color"], "south")
+        self.assertEqual(summary["result_c_tiles"]["(0, 0)"], [6, 6, 22, 22])
+        self.assertEqual(summary["result_c_tiles"]["(1, 1)"], [38, 38, 54, 54])
+
+
 class VectorDotExampleTests(unittest.TestCase):
     def test_vector_dot_program_auto_generates_and_runs_compute_ir(self) -> None:
         example_dir = Path(__file__).resolve().parents[1] / "examples/vector_vector_dot"
@@ -349,6 +454,173 @@ class VectorDotExampleTests(unittest.TestCase):
         self.assertEqual(workload["color_directions"]["partial_sum_color"], "east")
         self.assertEqual(workload["color_packets"]["partial_sum_color"], 3)
         self.assertGreater(summary["vector_dot_ops_per_cycle"], 0.0)
+
+
+class OpenCakePrototypeTests(unittest.TestCase):
+    def test_chakra_trace_loads_gemm_workload(self) -> None:
+        trace_path = Path(__file__).resolve().parents[1] / "examples/opencake_pipeline/chakra_gemm.jsonl"
+
+        trace = ChakraTrace.read(trace_path)
+        workload = trace.gemm_workload()
+
+        self.assertEqual(len(trace.nodes), 4)
+        self.assertEqual((workload.m, workload.n, workload.k), (1024, 1024, 1024))
+        self.assertEqual(workload.total_ops, 2_147_483_648)
+
+    @unittest.skipUnless(protobuf_available(), "protobuf is not installed in this Python environment")
+    def test_real_chakra_et_trace_loads_gemm_workload(self) -> None:
+        trace_path = Path("/tmp/opencake_chakra_gemm.et")
+
+        write_gemm_et_trace(trace_path, GemmWorkload(m=64, n=32, k=16))
+        trace = ChakraTrace.read(trace_path)
+        workload = trace.gemm_workload()
+        result = run_chakra_to_wafer_sim(
+            chakra_trace=trace_path,
+            hardware=HardwareSpec(mesh_rows=4, mesh_cols=4, pe_block_rows=2, pe_block_cols=2),
+        )
+
+        self.assertEqual(len(trace.nodes), 1)
+        self.assertEqual((workload.m, workload.n, workload.k), (64, 32, 16))
+        self.assertEqual(result.summary()["workload"]["total_ops"], 65_536)
+
+    def test_mapper_lowers_gemm_to_pe_block_spatial_ir(self) -> None:
+        workload = GemmWorkload(m=8, n=8, k=4)
+        hardware = HardwareSpec(
+            mesh_rows=4,
+            mesh_cols=4,
+            pe_block_rows=2,
+            pe_block_cols=2,
+            compute_ops_per_cycle_per_rank=64.0,
+            sram_bandwidth_bytes_per_cycle_per_rank=32.0,
+            link_bandwidth_bytes_per_cycle=16.0,
+            router_latency_cycles=1.0,
+            sram_bytes_per_rank=1024,
+        )
+
+        program = OpenCakeMapper().map_gemm(workload, hardware)
+        records = program.records()
+        result = OpenCakeBackend().run(program, hardware)
+
+        self.assertEqual(program.workload["type"], "gemm")
+        self.assertEqual(program.hardware["rank_rows"], 2)
+        self.assertEqual(program.hardware["rank_cols"], 2)
+        self.assertEqual(records[0], {"op": "define_color", "color": "a_east", "direction": "east"})
+        self.assertEqual(records[1], {"op": "define_color", "color": "b_south", "direction": "south"})
+        self.assertEqual(len([record for record in records if record["op"] == "compute"]), 4)
+        self.assertEqual(len([record for record in records if record["op"] == "send"]), 4)
+        self.assertEqual(result.ranks, 4)
+        self.assertEqual(result.compute_ops, 512)
+        self.assertEqual(result.compute_cycles, 2.0)
+        self.assertEqual(result.memory_cycles, 6.0)
+        self.assertEqual(result.network_cycles, 5.0)
+        self.assertEqual(result.sim_time_cycles, 6.0)
+        self.assertAlmostEqual(result.max_sram_utilization, 192 / 1024)
+        self.assertGreater(result.compute_efficiency, 0.0)
+
+    def test_formal_spatial_ir_schema_validation(self) -> None:
+        program = OpenCakeMapper().map_gemm(
+            GemmWorkload(m=8, n=8, k=4),
+            HardwareSpec(mesh_rows=4, mesh_cols=4, pe_block_rows=2, pe_block_cols=2),
+        )
+
+        validation = validate_spatial_program(program)
+
+        self.assertEqual(validation.schema, "opencake.spatial_ir.v1")
+        self.assertEqual(validation.ops, 22)
+        self.assertEqual(validation.ranks_with_allocations, 4)
+        self.assertEqual(validation.colors, ("a_east", "b_south"))
+
+    def test_opencake_gemm_example_writes_jsonl(self) -> None:
+        example_dir = Path(__file__).resolve().parents[1] / "examples/opencake_gemm"
+        run_module = load_module(example_dir / "run.py", "opencake_gemm_run")
+        ir_path = Path("/tmp/opencake_gemm_test.jsonl")
+
+        summary = run_module.run_opencake_gemm(
+            m=8,
+            n=8,
+            k=4,
+            mesh_rows=4,
+            mesh_cols=4,
+            pe_block_rows=2,
+            pe_block_cols=2,
+            ir_out=ir_path,
+        )
+
+        self.assertEqual(summary["workload"]["total_ops"], 512)
+        self.assertEqual(summary["hardware"]["ranks"], 4)
+        self.assertGreater(summary["spatial_ir_ops"], 0)
+        self.assertTrue(ir_path.exists())
+        self.assertEqual(ir_path.read_text(encoding="utf-8").splitlines()[0], '{"color": "a_east", "direction": "east", "op": "define_color"}')
+
+    def test_full_chakra_to_wafer_sim_pipeline(self) -> None:
+        trace_path = Path(__file__).resolve().parents[1] / "examples/opencake_pipeline/chakra_gemm.jsonl"
+        spatial_ir_path = Path("/tmp/opencake_pipeline_spatial_ir.jsonl")
+
+        result = run_chakra_to_wafer_sim(
+            chakra_trace=trace_path,
+            hardware=HardwareSpec(),
+            spatial_ir_out=spatial_ir_path,
+        )
+        summary = result.summary()
+
+        self.assertEqual(summary["chakra_nodes"], 4)
+        self.assertEqual(summary["workload"]["type"], "gemm")
+        self.assertEqual(summary["hardware"]["ranks"], 16)
+        self.assertEqual(summary["spatial_ir_ops"], 90)
+        self.assertEqual(summary["simulator"]["backend"], "opencake_astrasim_wafer_python")
+        self.assertEqual(summary["simulator"]["sim_time_cycles"], 32768.0)
+        self.assertTrue(spatial_ir_path.exists())
+        self.assertEqual(len(spatial_ir_path.read_text(encoding="utf-8").splitlines()), 90)
+
+    def test_formal_pipeline_exports_astrasim_package(self) -> None:
+        trace_path = Path(__file__).resolve().parents[1] / "examples/opencake_pipeline/chakra_gemm.jsonl"
+        out_dir = Path("/tmp/opencake_formal_package_test")
+
+        result = run_formal_opencake_pipeline(
+            chakra_trace=trace_path,
+            out_dir=out_dir,
+            hardware=HardwareSpec(),
+        )
+        summary = result.summary()
+        manifest = json.loads((out_dir / "manifest.json").read_text(encoding="utf-8"))
+        system = json.loads((out_dir / "system.json").read_text(encoding="utf-8"))
+        reference = json.loads((out_dir / "reference_result.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(summary["validation"]["schema"], "opencake.spatial_ir.v1")
+        self.assertEqual(manifest["backend_contract"], "Astra-Sim C++ OpenCake wafer backend input package")
+        self.assertEqual(system["rank_model"], "pe_block")
+        self.assertEqual(system["ranks"], 16)
+        self.assertIn("OpenCake2DMesh", (out_dir / "network.yml").read_text(encoding="utf-8"))
+        self.assertEqual(reference["sim_time_cycles"], 32768.0)
+        self.assertEqual(len((out_dir / "workload/opencake_spatial_ir.jsonl").read_text(encoding="utf-8").splitlines()), 90)
+
+    def test_cpp_opencake_backend_matches_python_reference(self) -> None:
+        trace_path = Path(__file__).resolve().parents[1] / "examples/opencake_pipeline/chakra_gemm.jsonl"
+        backend_dir = Path(__file__).resolve().parents[1] / "cpp/opencake_wafer_backend"
+        out_dir = Path("/tmp/opencake_cpp_backend_test_package")
+
+        run_formal_opencake_pipeline(
+            chakra_trace=trace_path,
+            out_dir=out_dir,
+            hardware=HardwareSpec(),
+        )
+        subprocess.run(["make"], cwd=backend_dir, check=True)
+        completed = subprocess.run(
+            [
+                str(backend_dir / "build/opencake_wafer_backend"),
+                "--package",
+                str(out_dir),
+                "--check-reference",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        result = json.loads(completed.stdout)
+
+        self.assertEqual(result["backend"], "opencake_wafer_backend_cpp")
+        self.assertEqual(result["sim_time_cycles"], 32768.0)
+        self.assertEqual(result["compute_ops"], 2_147_483_648)
 
 
 if __name__ == "__main__":

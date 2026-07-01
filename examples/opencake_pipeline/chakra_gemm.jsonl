@@ -1,0 +1,4 @@
+{"id": 0, "type": "memory", "op": "read", "tensor": "A", "bytes": 4194304}
+{"id": 1, "type": "memory", "op": "read", "tensor": "B", "bytes": 4194304}
+{"id": 2, "type": "compute", "op": "gemm", "m": 1024, "n": 1024, "k": 1024, "bytes_per_element": 4, "ops_per_mac": 2, "deps": [0, 1]}
+{"id": 3, "type": "memory", "op": "write", "tensor": "C", "bytes": 4194304, "deps": [2]}

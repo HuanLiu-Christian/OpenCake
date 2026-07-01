@@ -28,6 +28,32 @@ def gemv_ops(rows: int, cols: int, ops_per_mac: int = 2) -> int:
     return rows * cols * ops_per_mac
 
 
+def gemm(
+    left: list[float],
+    right: list[float],
+    m: int,
+    n: int,
+    k: int,
+) -> list[float]:
+    if len(left) != m * k:
+        raise ValueError("left matrix shape does not match M x K")
+    if len(right) != k * n:
+        raise ValueError("right matrix shape does not match K x N")
+
+    output = []
+    for row in range(m):
+        for col in range(n):
+            acc = 0.0
+            for kk in range(k):
+                acc += left[row * k + kk] * right[kk * n + col]
+            output.append(acc)
+    return output
+
+
+def gemm_ops(m: int, n: int, k: int, ops_per_mac: int = 2) -> int:
+    return m * n * k * ops_per_mac
+
+
 def vector_dot(
     left: list[float],
     right: list[float],
