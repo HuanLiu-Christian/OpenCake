@@ -511,10 +511,11 @@ class OpenCakePrototypeTests(unittest.TestCase):
         self.assertEqual(result.ranks, 4)
         self.assertEqual(result.compute_ops, 512)
         self.assertEqual(result.compute_cycles, 2.0)
-        self.assertEqual(result.memory_cycles, 6.0)
+        self.assertEqual(result.memory_cycles, 8.0)
         self.assertEqual(result.network_cycles, 5.0)
-        self.assertEqual(result.sim_time_cycles, 6.0)
-        self.assertAlmostEqual(result.max_sram_utilization, 192 / 1024)
+        self.assertEqual(result.sim_time_cycles, 15.0)
+        self.assertAlmostEqual(result.max_sram_utilization, 320 / 1024)
+        self.assertTrue(result.sram_capacity_feasible)
         self.assertGreater(result.compute_efficiency, 0.0)
 
     def test_formal_spatial_ir_schema_validation(self) -> None:
@@ -526,7 +527,7 @@ class OpenCakePrototypeTests(unittest.TestCase):
         validation = validate_spatial_program(program)
 
         self.assertEqual(validation.schema, "opencake.spatial_ir.v1")
-        self.assertEqual(validation.ops, 22)
+        self.assertEqual(validation.ops, 30)
         self.assertEqual(validation.ranks_with_allocations, 4)
         self.assertEqual(validation.colors, ("a_east", "b_south"))
 
@@ -565,12 +566,16 @@ class OpenCakePrototypeTests(unittest.TestCase):
 
         self.assertEqual(summary["chakra_nodes"], 4)
         self.assertEqual(summary["workload"]["type"], "gemm")
-        self.assertEqual(summary["hardware"]["ranks"], 16)
-        self.assertEqual(summary["spatial_ir_ops"], 90)
+        self.assertEqual(summary["hardware"]["rank_model"], "pe")
+        self.assertEqual(summary["hardware"]["ranks"], 1024)
+        self.assertEqual(summary["spatial_ir_ops"], 53250)
         self.assertEqual(summary["simulator"]["backend"], "opencake_astrasim_wafer_python")
-        self.assertEqual(summary["simulator"]["sim_time_cycles"], 32768.0)
+        self.assertEqual(summary["simulator"]["timing_model"], "timestamp_boundary_rank_memory_compute_network")
+        self.assertEqual(summary["simulator"]["sim_time_cycles"], 67519.0)
+        self.assertTrue(summary["simulator"]["sram_capacity_feasible"])
+        self.assertEqual(summary["simulator"]["max_sram_utilization"], 0.75)
         self.assertTrue(spatial_ir_path.exists())
-        self.assertEqual(len(spatial_ir_path.read_text(encoding="utf-8").splitlines()), 90)
+        self.assertEqual(len(spatial_ir_path.read_text(encoding="utf-8").splitlines()), 53250)
 
     def test_formal_pipeline_exports_astrasim_package(self) -> None:
         trace_path = Path(__file__).resolve().parents[1] / "examples/opencake_pipeline/chakra_gemm.jsonl"
@@ -588,11 +593,14 @@ class OpenCakePrototypeTests(unittest.TestCase):
 
         self.assertEqual(summary["validation"]["schema"], "opencake.spatial_ir.v1")
         self.assertEqual(manifest["backend_contract"], "Astra-Sim C++ OpenCake wafer backend input package")
-        self.assertEqual(system["rank_model"], "pe_block")
-        self.assertEqual(system["ranks"], 16)
+        self.assertEqual(system["rank_model"], "pe")
+        self.assertEqual(system["ranks"], 1024)
+        self.assertEqual(system["sram_banks_per_rank"], 1)
+        self.assertEqual(system["sram_bytes_per_bank"], 48 * 1024)
         self.assertIn("OpenCake2DMesh", (out_dir / "network.yml").read_text(encoding="utf-8"))
-        self.assertEqual(reference["sim_time_cycles"], 32768.0)
-        self.assertEqual(len((out_dir / "workload/opencake_spatial_ir.jsonl").read_text(encoding="utf-8").splitlines()), 90)
+        self.assertEqual(reference["sim_time_cycles"], 67519.0)
+        self.assertTrue(reference["sram_capacity_feasible"])
+        self.assertEqual(len((out_dir / "workload/opencake_spatial_ir.jsonl").read_text(encoding="utf-8").splitlines()), 53250)
 
     def test_cpp_opencake_backend_matches_python_reference(self) -> None:
         trace_path = Path(__file__).resolve().parents[1] / "examples/opencake_pipeline/chakra_gemm.jsonl"
@@ -619,7 +627,7 @@ class OpenCakePrototypeTests(unittest.TestCase):
         result = json.loads(completed.stdout)
 
         self.assertEqual(result["backend"], "opencake_wafer_backend_cpp")
-        self.assertEqual(result["sim_time_cycles"], 32768.0)
+        self.assertEqual(result["sim_time_cycles"], 67519.0)
         self.assertEqual(result["compute_ops"], 2_147_483_648)
 
 

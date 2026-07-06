@@ -16,8 +16,8 @@ def main() -> None:
     parser.add_argument("--out-dir", type=Path, default=Path("/tmp/opencake_astrasim_package"))
     parser.add_argument("--mesh-rows", type=int, default=32)
     parser.add_argument("--mesh-cols", type=int, default=32)
-    parser.add_argument("--pe-block-rows", type=int, default=8)
-    parser.add_argument("--pe-block-cols", type=int, default=8)
+    parser.add_argument("--pe-block-rows", type=int, default=1)
+    parser.add_argument("--pe-block-cols", type=int, default=1)
     args = parser.parse_args()
 
     result = run_formal_opencake_pipeline(

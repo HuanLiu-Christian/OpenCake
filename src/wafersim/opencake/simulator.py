@@ -37,6 +37,6 @@ class AstraSimWaferSimulator:
     def run(self, program: OpenCakeProgram, hardware: HardwareSpec) -> AstraSimWaferResult:
         return AstraSimWaferResult(
             backend="opencake_astrasim_wafer_python",
-            timing_model="rank_level_2d_mesh_compute_memory_network",
+            timing_model="timestamp_boundary_rank_memory_compute_network",
             result=self._backend.run(program, hardware),
         )

@@ -13,8 +13,8 @@ def run_pipeline(
     spatial_ir_out: Path | None = None,
     mesh_rows: int = 32,
     mesh_cols: int = 32,
-    pe_block_rows: int = 8,
-    pe_block_cols: int = 8,
+    pe_block_rows: int = 1,
+    pe_block_cols: int = 1,
 ) -> dict[str, object]:
     result = run_chakra_to_wafer_sim(
         chakra_trace=chakra_trace,
@@ -38,8 +38,8 @@ def main() -> None:
     parser.add_argument("--spatial-ir-out", type=Path, default=None)
     parser.add_argument("--mesh-rows", type=int, default=32)
     parser.add_argument("--mesh-cols", type=int, default=32)
-    parser.add_argument("--pe-block-rows", type=int, default=8)
-    parser.add_argument("--pe-block-cols", type=int, default=8)
+    parser.add_argument("--pe-block-rows", type=int, default=1)
+    parser.add_argument("--pe-block-cols", type=int, default=1)
     args = parser.parse_args()
 
     summary = run_pipeline(

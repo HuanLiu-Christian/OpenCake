@@ -33,6 +33,8 @@ class SendOp:
     color: str
     bytes: int
     route: tuple[Coord, ...]
+    tensor: str = ""
+    k_start: int = 0
 
     @property
     def hops(self) -> int:
@@ -49,6 +51,7 @@ class ComputeOp:
     k: int
     ops: int
     memory_bytes: int
+    k_start: int = 0
 
 
 SpatialOp = DefineColorOp | AllocOp | SendOp | ComputeOp

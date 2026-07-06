@@ -45,14 +45,16 @@ class HardwareSpec:
 
     mesh_rows: int = 32
     mesh_cols: int = 32
-    pe_block_rows: int = 8
-    pe_block_cols: int = 8
-    compute_ops_per_cycle_per_rank: float = 4096.0
-    sram_bandwidth_bytes_per_cycle_per_rank: float = 1024.0
+    pe_block_rows: int = 1
+    pe_block_cols: int = 1
+    compute_ops_per_cycle_per_rank: float = 64.0
+    sram_bandwidth_bytes_per_cycle_per_rank: float = 16.0
     link_bandwidth_bytes_per_cycle: float = 128.0
     router_latency_cycles: float = 1.0
     queue_capacity: int = 8
-    sram_bytes_per_rank: int = 8 * 8 * 48 * 1024
+    sram_bytes_per_rank: int = 48 * 1024
+    gemm_k_tile: int = 64
+    double_buffer_ab: bool = True
 
     def validate(self) -> None:
         if self.mesh_rows <= 0 or self.mesh_cols <= 0:
@@ -73,6 +75,8 @@ class HardwareSpec:
             raise ValueError("queue capacity must be positive")
         if self.sram_bytes_per_rank <= 0:
             raise ValueError("SRAM capacity must be positive")
+        if self.gemm_k_tile <= 0:
+            raise ValueError("GEMM K tile must be positive")
 
     @property
     def rank_rows(self) -> int:
@@ -85,3 +89,19 @@ class HardwareSpec:
     @property
     def ranks(self) -> int:
         return self.rank_rows * self.rank_cols
+
+    @property
+    def pes_per_rank(self) -> int:
+        return self.pe_block_rows * self.pe_block_cols
+
+    @property
+    def sram_banks_per_rank(self) -> int:
+        return self.pes_per_rank
+
+    @property
+    def sram_bytes_per_bank(self) -> int:
+        return self.sram_bytes_per_rank // self.sram_banks_per_rank
+
+    @property
+    def rank_model(self) -> str:
+        return "pe" if self.pes_per_rank == 1 else "pe_block"

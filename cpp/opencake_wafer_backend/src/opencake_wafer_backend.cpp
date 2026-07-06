@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cmath>
 #include <fstream>
 #include <iostream>
@@ -27,11 +28,18 @@ struct Result {
   double sim_time_cycles = 0.0;
   long long max_sram_bytes_per_rank = 0;
   double max_sram_utilization = 0.0;
+  double max_sram_pressure_ratio = 0.0;
+  bool sram_capacity_feasible = true;
   double max_link_utilization = 0.0;
   double compute_efficiency = 0.0;
 };
 
 using Coord = std::pair<int, int>;
+
+static std::string tensor_key(const Coord& rank, const std::string& tensor, int k_start) {
+  return std::to_string(rank.first) + "," + std::to_string(rank.second) + ":" + tensor + ":" +
+         std::to_string(k_start);
+}
 
 static std::string read_file(const std::string& path) {
   std::ifstream input(path);
@@ -59,6 +67,27 @@ static std::string json_string(const std::string& text, const std::string& key) 
     throw std::runtime_error("missing JSON string key " + key);
   }
   return match[1].str();
+}
+
+static std::string json_string_or(
+    const std::string& text,
+    const std::string& key,
+    const std::string& fallback) {
+  const std::regex pattern("\"" + key + "\"\\s*:\\s*\"([^\"]+)\"");
+  std::smatch match;
+  if (!std::regex_search(text, match, pattern)) {
+    return fallback;
+  }
+  return match[1].str();
+}
+
+static double json_number_or(const std::string& text, const std::string& key, double fallback) {
+  const std::regex pattern("\"" + key + "\"\\s*:\\s*([-+0-9.eE]+)");
+  std::smatch match;
+  if (!std::regex_search(text, match, pattern)) {
+    return fallback;
+  }
+  return std::stod(match[1].str());
 }
 
 static double yml_bracket_number(const std::string& text, const std::string& key) {
@@ -122,11 +151,16 @@ static Result run_backend(const std::string& package_root, const HardwareConfig&
     throw std::runtime_error("cannot open spatial IR");
   }
 
-  std::map<Coord, double> compute_cycles_by_rank;
-  std::map<Coord, double> memory_cycles_by_rank;
+  std::map<Coord, double> compute_ready_by_rank;
+  std::map<Coord, double> memory_ready_by_rank;
+  std::map<Coord, double> compute_busy_by_rank;
+  std::map<Coord, double> memory_busy_by_rank;
   std::map<Coord, long long> sram_bytes_by_rank;
   std::map<std::pair<Coord, Coord>, double> link_busy_cycles;
+  std::map<std::pair<Coord, Coord>, double> link_ready_cycles;
+  std::map<std::string, double> tensor_ready_by_rank;
   long long total_compute_ops = 0;
+  double last_end_cycle = 0.0;
 
   std::string line;
   while (std::getline(spatial_ir, line)) {
@@ -142,18 +176,44 @@ static Result run_backend(const std::string& package_root, const HardwareConfig&
       const Coord rank = json_coord(line, "rank");
       const auto ops = static_cast<long long>(json_number(line, "ops"));
       const double memory_bytes = json_number(line, "memory_bytes");
+      const int k_start = static_cast<int>(json_number_or(line, "k_start", 0));
       total_compute_ops += ops;
-      compute_cycles_by_rank[rank] += ops / config.compute_ops_per_cycle_per_rank;
-      memory_cycles_by_rank[rank] +=
-          memory_bytes / config.sram_bandwidth_bytes_per_cycle_per_rank;
+      const double a_ready = tensor_ready_by_rank[tensor_key(rank, "A", k_start)];
+      const double b_ready = tensor_ready_by_rank[tensor_key(rank, "B", k_start)];
+      const double memory_start = std::max({a_ready, b_ready, memory_ready_by_rank[rank]});
+      const double memory_duration = memory_bytes / config.sram_bandwidth_bytes_per_cycle_per_rank;
+      const double memory_end = memory_start + memory_duration;
+      memory_ready_by_rank[rank] = memory_end;
+      memory_busy_by_rank[rank] += memory_duration;
+
+      const double compute_start = std::max(memory_end, compute_ready_by_rank[rank]);
+      const double compute_duration = ops / config.compute_ops_per_cycle_per_rank;
+      const double compute_end = compute_start + compute_duration;
+      compute_ready_by_rank[rank] = compute_end;
+      compute_busy_by_rank[rank] += compute_duration;
+      last_end_cycle = std::max(last_end_cycle, std::max(memory_end, compute_end));
     } else if (op == "send") {
+      const Coord src_rank = json_coord(line, "src_rank");
+      const Coord dst_rank = json_coord(line, "dst_rank");
+      const std::string tensor = json_string_or(line, "tensor", "");
+      const int k_start = static_cast<int>(json_number_or(line, "k_start", 0));
       const double bytes = json_number(line, "bytes");
       const std::vector<Coord> route = json_route(line);
       const double per_link_cycles =
           config.router_latency_cycles + bytes / config.link_bandwidth_bytes_per_cycle;
+      double arrival_cycle = tensor_ready_by_rank[tensor_key(src_rank, tensor, k_start)];
       for (std::size_t index = 0; index + 1 < route.size(); ++index) {
-        link_busy_cycles[{route[index], route[index + 1]}] += per_link_cycles;
+        const auto link = std::make_pair(route[index], route[index + 1]);
+        const double start_cycle = std::max(arrival_cycle, link_ready_cycles[link]);
+        const double end_cycle = start_cycle + per_link_cycles;
+        link_ready_cycles[link] = end_cycle;
+        link_busy_cycles[link] += per_link_cycles;
+        arrival_cycle = end_cycle;
       }
+      if (!tensor.empty()) {
+        tensor_ready_by_rank[tensor_key(dst_rank, tensor, k_start)] = arrival_cycle;
+      }
+      last_end_cycle = std::max(last_end_cycle, arrival_cycle);
     } else if (op == "define_color") {
       continue;
     } else {
@@ -164,10 +224,10 @@ static Result run_backend(const std::string& package_root, const HardwareConfig&
   Result result;
   result.ranks = config.ranks;
   result.compute_ops = total_compute_ops;
-  for (const auto& item : compute_cycles_by_rank) {
+  for (const auto& item : compute_busy_by_rank) {
     result.compute_cycles = std::max(result.compute_cycles, item.second);
   }
-  for (const auto& item : memory_cycles_by_rank) {
+  for (const auto& item : memory_busy_by_rank) {
     result.memory_cycles = std::max(result.memory_cycles, item.second);
   }
   for (const auto& item : link_busy_cycles) {
@@ -176,9 +236,10 @@ static Result run_backend(const std::string& package_root, const HardwareConfig&
   for (const auto& item : sram_bytes_by_rank) {
     result.max_sram_bytes_per_rank = std::max(result.max_sram_bytes_per_rank, item.second);
   }
-  result.sim_time_cycles =
-      std::max(result.compute_cycles, std::max(result.memory_cycles, result.network_cycles));
-  result.max_sram_utilization = result.max_sram_bytes_per_rank / config.sram_bytes_per_rank;
+  result.sim_time_cycles = last_end_cycle;
+  result.max_sram_pressure_ratio = result.max_sram_bytes_per_rank / config.sram_bytes_per_rank;
+  result.max_sram_utilization = std::min(result.max_sram_pressure_ratio, 1.0);
+  result.sram_capacity_feasible = result.max_sram_pressure_ratio <= 1.0;
   result.max_link_utilization =
       result.sim_time_cycles == 0.0 ? 0.0 : result.network_cycles / result.sim_time_cycles;
   const double peak_compute =
@@ -195,11 +256,14 @@ static void print_result(const Result& result) {
             << "  \"compute_ops\": " << result.compute_ops << ",\n"
             << "  \"max_link_utilization\": " << result.max_link_utilization << ",\n"
             << "  \"max_sram_bytes_per_rank\": " << result.max_sram_bytes_per_rank << ",\n"
+            << "  \"max_sram_pressure_ratio\": " << result.max_sram_pressure_ratio << ",\n"
             << "  \"max_sram_utilization\": " << result.max_sram_utilization << ",\n"
             << "  \"memory_cycles\": " << result.memory_cycles << ",\n"
             << "  \"network_cycles\": " << result.network_cycles << ",\n"
             << "  \"ranks\": " << result.ranks << ",\n"
-            << "  \"sim_time_cycles\": " << result.sim_time_cycles << "\n"
+            << "  \"sim_time_cycles\": " << result.sim_time_cycles << ",\n"
+            << "  \"sram_capacity_feasible\": "
+            << (result.sram_capacity_feasible ? "true" : "false") << "\n"
             << "}\n";
 }
 
@@ -212,6 +276,7 @@ static void check_reference(const std::string& package_root, const Result& resul
       {"network_cycles", result.network_cycles},
       {"sim_time_cycles", result.sim_time_cycles},
       {"max_sram_utilization", result.max_sram_utilization},
+      {"max_sram_pressure_ratio", result.max_sram_pressure_ratio},
       {"max_link_utilization", result.max_link_utilization},
       {"compute_efficiency", result.compute_efficiency},
   };
