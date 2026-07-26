@@ -1,0 +1,30 @@
+{"color": "a_east", "direction": "east", "op": "define_color"}
+{"color": "b_south", "direction": "south", "op": "define_color"}
+{"addr": 0, "bytes": 16, "name": "c_tile", "op": "alloc", "rank": [0, 0]}
+{"addr": 16, "bytes": 32, "name": "a_buffer0", "op": "alloc", "rank": [0, 0]}
+{"addr": 48, "bytes": 32, "name": "b_buffer0", "op": "alloc", "rank": [0, 0]}
+{"addr": 80, "bytes": 32, "name": "a_buffer1", "op": "alloc", "rank": [0, 0]}
+{"addr": 112, "bytes": 32, "name": "b_buffer1", "op": "alloc", "rank": [0, 0]}
+{"k": 4, "k_start": 0, "kernel": "gemm_k_chunk", "m": 2, "memory_bytes": 96, "n": 2, "op": "compute", "ops": 32, "rank": [0, 0]}
+{"addr": 0, "bytes": 16, "name": "c_tile", "op": "alloc", "rank": [0, 1]}
+{"addr": 16, "bytes": 32, "name": "a_buffer0", "op": "alloc", "rank": [0, 1]}
+{"addr": 48, "bytes": 32, "name": "b_buffer0", "op": "alloc", "rank": [0, 1]}
+{"addr": 80, "bytes": 32, "name": "a_buffer1", "op": "alloc", "rank": [0, 1]}
+{"addr": 112, "bytes": 32, "name": "b_buffer1", "op": "alloc", "rank": [0, 1]}
+{"bytes": 32, "color": "a_east", "dst_rank": [0, 1], "k_start": 0, "op": "send", "route": [[0, 0], [0, 1]], "src_rank": [0, 0], "tensor": "A"}
+{"k": 4, "k_start": 0, "kernel": "gemm_k_chunk", "m": 2, "memory_bytes": 96, "n": 2, "op": "compute", "ops": 32, "rank": [0, 1]}
+{"addr": 0, "bytes": 16, "name": "c_tile", "op": "alloc", "rank": [1, 0]}
+{"addr": 16, "bytes": 32, "name": "a_buffer0", "op": "alloc", "rank": [1, 0]}
+{"addr": 48, "bytes": 32, "name": "b_buffer0", "op": "alloc", "rank": [1, 0]}
+{"addr": 80, "bytes": 32, "name": "a_buffer1", "op": "alloc", "rank": [1, 0]}
+{"addr": 112, "bytes": 32, "name": "b_buffer1", "op": "alloc", "rank": [1, 0]}
+{"bytes": 32, "color": "b_south", "dst_rank": [1, 0], "k_start": 0, "op": "send", "route": [[0, 0], [1, 0]], "src_rank": [0, 0], "tensor": "B"}
+{"k": 4, "k_start": 0, "kernel": "gemm_k_chunk", "m": 2, "memory_bytes": 96, "n": 2, "op": "compute", "ops": 32, "rank": [1, 0]}
+{"addr": 0, "bytes": 16, "name": "c_tile", "op": "alloc", "rank": [1, 1]}
+{"addr": 16, "bytes": 32, "name": "a_buffer0", "op": "alloc", "rank": [1, 1]}
+{"addr": 48, "bytes": 32, "name": "b_buffer0", "op": "alloc", "rank": [1, 1]}
+{"addr": 80, "bytes": 32, "name": "a_buffer1", "op": "alloc", "rank": [1, 1]}
+{"addr": 112, "bytes": 32, "name": "b_buffer1", "op": "alloc", "rank": [1, 1]}
+{"bytes": 32, "color": "a_east", "dst_rank": [1, 1], "k_start": 0, "op": "send", "route": [[1, 0], [1, 1]], "src_rank": [1, 0], "tensor": "A"}
+{"bytes": 32, "color": "b_south", "dst_rank": [1, 1], "k_start": 0, "op": "send", "route": [[0, 1], [1, 1]], "src_rank": [0, 1], "tensor": "B"}
+{"k": 4, "k_start": 0, "kernel": "gemm_k_chunk", "m": 2, "memory_bytes": 96, "n": 2, "op": "compute", "ops": 32, "rank": [1, 1]}

@@ -4,11 +4,12 @@ from dataclasses import dataclass
 import gzip
 import importlib.util
 import json
+from math import ceil
 import os
 from pathlib import Path
 import sys
 from types import ModuleType
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, Iterable, Mapping
 
 from wafersim.opencake.workload import GemmWorkload
 
@@ -16,7 +17,9 @@ DEFAULT_CHAKRA_PROTOBUF = Path(
     "/tmp/astra-sim-micro2024/micro2024/astra-sim/extern/graph_frontend/"
     "chakra/schema/protobuf/et_def_pb2.py"
 )
+EMBEDDED_CHAKRA_PROTOBUF = Path(__file__).with_name("proto") / "et_def_pb2.py"
 CHAKRA_PROTOBUF_CANDIDATES = (
+    EMBEDDED_CHAKRA_PROTOBUF,
     DEFAULT_CHAKRA_PROTOBUF,
     Path(
         "/tmp/astra-sim-micro2024/micro2024/astra-sim/extern/graph_frontend/"
@@ -27,6 +30,21 @@ CHAKRA_PROTOBUF_CANDIDATES = (
         "chakra/backends/chakra_00_4_backend/et_def/et_def_pb2.py"
     ),
 )
+
+
+@dataclass(frozen=True, slots=True)
+class ChakraEtPackage:
+    """Astra-Sim native rank-sharded Chakra ET workload."""
+
+    prefix: Path
+    rank_files: tuple[Path, ...]
+
+    def summary(self) -> dict[str, object]:
+        return {
+            "prefix": str(self.prefix),
+            "rank_files": [str(path) for path in self.rank_files],
+            "ranks": len(self.rank_files),
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,6 +193,273 @@ def write_gemm_et_trace(
     with output.open("wb") as handle:
         _write_length_delimited_message(handle, metadata)
         _write_length_delimited_message(handle, gemm)
+
+
+def write_execution_trace_et(
+    path: str | Path,
+    records: Iterable[Mapping[str, Any]],
+    *,
+    proto_module_path: str | Path | None = None,
+) -> Path:
+    """Write one formal Chakra ET containing the complete scheduled DAG.
+
+    This aggregate file is useful for inspection and round-trip validation.
+    Astra-Sim's native multi-rank loader uses :func:`write_ranked_execution_trace_et`
+    instead because it expects one ``<prefix>.<rank>.et`` file per rank.
+    """
+
+    pb2 = _load_et_def_pb2(proto_module_path)
+    output = Path(path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    normalized = tuple(dict(record) for record in records)
+    rank_cols = _infer_rank_cols(normalized)
+    for record in normalized:
+        if record.get("type") == "communication":
+            record["rank_cols"] = rank_cols
+    _write_et_file(output, normalized, pb2, rank_id=None)
+    return output
+
+
+def write_ranked_execution_trace_et(
+    prefix: str | Path,
+    records: Iterable[Mapping[str, Any]],
+    *,
+    rank_rows: int,
+    rank_cols: int,
+    proto_module_path: str | Path | None = None,
+) -> ChakraEtPackage:
+    """Project a scheduled global DAG into Astra-Sim rank-local ET files.
+
+    Communication is represented as a matched ``COMM_SEND_NODE`` in the
+    source rank and a synthesized ``COMM_RECV_NODE`` in the destination rank.
+    Dependencies on a remote send are rewritten to the local receive node.
+    """
+
+    if rank_rows <= 0 or rank_cols <= 0:
+        raise ValueError("rank_rows and rank_cols must be positive")
+
+    pb2 = _load_et_def_pb2(proto_module_path)
+    output_prefix = Path(prefix)
+    output_prefix.parent.mkdir(parents=True, exist_ok=True)
+    normalized = tuple(dict(record) for record in records)
+    records_by_id = {int(record["id"]): record for record in normalized}
+    if len(records_by_id) != len(normalized):
+        raise ValueError("Chakra records contain duplicate node IDs")
+
+    rank_coords = tuple(
+        (row, col) for row in range(rank_rows) for col in range(rank_cols)
+    )
+    per_rank: dict[tuple[int, int], list[dict[str, Any]]] = {
+        rank: [] for rank in rank_coords
+    }
+    global_records = [record for record in normalized if _record_rank(record) is None]
+    for rank in rank_coords:
+        per_rank[rank].extend(dict(record) for record in global_records)
+    for record in normalized:
+        rank = _record_rank(record)
+        if rank is None:
+            continue
+        if rank not in per_rank:
+            raise ValueError(f"record {record['id']} references rank {rank} outside the mesh")
+        per_rank[rank].append(dict(record))
+
+    next_id = max(records_by_id, default=0) + 1
+    recv_for_send: dict[tuple[tuple[int, int], int], int] = {}
+    for record in normalized:
+        if record.get("type") != "communication" or record.get("op") != "send":
+            continue
+        src = _coord(record.get("src_rank"), "src_rank", int(record["id"]))
+        dst = _coord(record.get("dst_rank"), "dst_rank", int(record["id"]))
+        if src not in per_rank or dst not in per_rank:
+            raise ValueError(f"send {record['id']} has endpoint outside the rank mesh")
+        recv_id = next_id
+        next_id += 1
+        recv_for_send[(dst, int(record["id"]))] = recv_id
+        receive = dict(record)
+        receive.update(
+            {
+                "id": recv_id,
+                "op": "recv",
+                "rank": list(dst),
+                "deps": [],
+                "source_send_id": int(record["id"]),
+            }
+        )
+        per_rank[dst].append(receive)
+
+    rank_files: list[Path] = []
+    for rank in rank_coords:
+        local_records = per_rank[rank]
+        local_ids = {int(record["id"]) for record in local_records}
+        rewritten: list[dict[str, Any]] = []
+        for record in local_records:
+            local = dict(record)
+            if local.get("type") == "communication":
+                local["rank_cols"] = rank_cols
+            deps: list[int] = []
+            for raw_dep in record.get("deps", ()):
+                dep = int(raw_dep)
+                if dep in local_ids:
+                    deps.append(dep)
+                    continue
+                recv_id = recv_for_send.get((rank, dep))
+                if recv_id is not None:
+                    deps.append(recv_id)
+            local["deps"] = sorted(set(deps))
+            rewritten.append(local)
+
+        rank_id = rank[0] * rank_cols + rank[1]
+        rank_path = Path(f"{output_prefix}.{rank_id}.et")
+        _write_et_file(rank_path, rewritten, pb2, rank_id=rank_id)
+        rank_files.append(rank_path)
+
+    return ChakraEtPackage(prefix=output_prefix, rank_files=tuple(rank_files))
+
+
+def _write_et_file(
+    path: Path,
+    records: Iterable[Mapping[str, Any]],
+    pb2: ModuleType,
+    *,
+    rank_id: int | None,
+) -> None:
+    metadata_attrs = [
+        pb2.AttributeProto(name="schema", string_val="chakra.et"),
+        pb2.AttributeProto(name="producer", string_val="wafersim.opencake"),
+        pb2.AttributeProto(name="time_unit", string_val="cycle"),
+    ]
+    if rank_id is not None:
+        metadata_attrs.append(pb2.AttributeProto(name="rank", uint32_val=rank_id))
+    metadata = pb2.GlobalMetadata(
+        version="opencake.chakra.et.v1",
+        attr=metadata_attrs,
+    )
+    ordered = sorted(
+        records,
+        key=lambda record: (float(record.get("start_cycle", 0.0)), int(record["id"])),
+    )
+    with path.open("wb") as handle:
+        _write_length_delimited_message(handle, metadata)
+        for record in ordered:
+            _write_length_delimited_message(handle, _record_to_et_node(record, pb2))
+
+
+def _record_to_et_node(record: Mapping[str, Any], pb2: ModuleType) -> Any:
+    node_id = int(record["id"])
+    op = str(record.get("op", "unknown"))
+    node_type = _record_node_type(record, pb2)
+    attrs = {
+        key: value
+        for key, value in record.items()
+        if key not in {"id", "type", "op", "deps"}
+    }
+    attrs["op"] = op
+    attrs["opencake_kind"] = str(record.get("type", "unknown"))
+
+    rank = _record_rank(record)
+    if rank is not None:
+        attrs["rank_row"] = rank[0]
+        attrs["rank_col"] = rank[1]
+
+    if node_type == pb2.COMP_NODE:
+        attrs["num_ops"] = int(record.get("ops", attrs.get("num_ops", 0)))
+        attrs["tensor_size"] = _compute_tensor_size(record)
+        attrs.setdefault("is_cpu_op", False)
+    elif node_type in {pb2.MEM_LOAD_NODE, pb2.MEM_STORE_NODE}:
+        attrs["tensor_size"] = int(record.get("bytes", attrs.get("tensor_size", 0)))
+    elif node_type in {pb2.COMM_SEND_NODE, pb2.COMM_RECV_NODE}:
+        src = _coord(record.get("src_rank"), "src_rank", node_id)
+        dst = _coord(record.get("dst_rank"), "dst_rank", node_id)
+        rank_cols = int(record.get("rank_cols", 0))
+        if rank_cols <= 0:
+            rank_cols = max(src[1], dst[1]) + 1
+        attrs["comm_src"] = src[0] * rank_cols + src[1]
+        attrs["comm_dst"] = dst[0] * rank_cols + dst[1]
+        attrs["comm_size"] = int(record.get("bytes", 0))
+        attrs["comm_tag"] = int(record.get("source_send_id", node_id))
+        attrs.setdefault("is_cpu_op", False)
+
+    start_cycle = float(record.get("start_cycle", 0.0))
+    duration_cycles = float(
+        record.get(
+            "duration_cycles",
+            float(record.get("end_cycle", start_cycle)) - start_cycle,
+        )
+    )
+    return pb2.Node(
+        id=node_id,
+        name=op,
+        type=node_type,
+        data_deps=[int(dep) for dep in record.get("deps", ())],
+        start_time_micros=max(0, ceil(start_cycle / 1000.0)),
+        duration_micros=max(0, ceil(duration_cycles / 1000.0)),
+        attr=[_attribute_proto(pb2, key, value) for key, value in attrs.items()],
+    )
+
+
+def _record_node_type(record: Mapping[str, Any], pb2: ModuleType) -> int:
+    kind = str(record.get("type", "unknown"))
+    op = str(record.get("op", "unknown"))
+    if kind in {"control", "metadata"}:
+        return pb2.METADATA_NODE
+    if kind == "compute":
+        return pb2.COMP_NODE
+    if kind == "memory":
+        return pb2.MEM_STORE_NODE if op == "alloc" else pb2.MEM_LOAD_NODE
+    if kind == "communication":
+        return pb2.COMM_RECV_NODE if op == "recv" else pb2.COMM_SEND_NODE
+    return pb2.INVALID_NODE
+
+
+def _attribute_proto(pb2: ModuleType, name: str, value: Any) -> Any:
+    if isinstance(value, bool):
+        return pb2.AttributeProto(name=name, bool_val=value)
+    if isinstance(value, int):
+        if value >= 0:
+            return pb2.AttributeProto(name=name, uint64_val=value)
+        return pb2.AttributeProto(name=name, int64_val=value)
+    if isinstance(value, float):
+        return pb2.AttributeProto(name=name, double_val=value)
+    if isinstance(value, str):
+        return pb2.AttributeProto(name=name, string_val=value)
+    return pb2.AttributeProto(
+        name=name,
+        string_val=json.dumps(value, sort_keys=True, separators=(",", ":")),
+    )
+
+
+def _compute_tensor_size(record: Mapping[str, Any]) -> int:
+    if int(record.get("bytes", 0)) > 0:
+        return int(record["bytes"])
+    m = int(record.get("m", 0))
+    n = int(record.get("n", 0))
+    k = int(record.get("k", 0))
+    if min(m, n, k) <= 0:
+        return 0
+    return (m * k + k * n + m * n) * int(record.get("bytes_per_element", 4))
+
+
+def _record_rank(record: Mapping[str, Any]) -> tuple[int, int] | None:
+    raw = record.get("rank")
+    if raw is None:
+        return None
+    return _coord(raw, "rank", int(record["id"]))
+
+
+def _infer_rank_cols(records: Iterable[Mapping[str, Any]]) -> int:
+    max_col = -1
+    for record in records:
+        for key in ("rank", "src_rank", "dst_rank"):
+            raw = record.get(key)
+            if isinstance(raw, (list, tuple)) and len(raw) == 2:
+                max_col = max(max_col, int(raw[1]))
+    return max_col + 1 if max_col >= 0 else 1
+
+
+def _coord(value: Any, name: str, node_id: int) -> tuple[int, int]:
+    if not isinstance(value, (list, tuple)) or len(value) != 2:
+        raise ValueError(f"record {node_id} has invalid {name}: {value!r}")
+    return int(value[0]), int(value[1])
 
 
 def _node_from_record(record: dict[str, Any], line_no: int) -> ChakraNode:

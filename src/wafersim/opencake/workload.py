@@ -5,12 +5,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True, slots=True)
 class GemmWorkload:
-    """Chakra-like high-level workload for one GEMM node.
-
-    This is intentionally smaller than real Chakra ET. It captures the part
-    needed by the first OpenCake prototype: GEMM shape, datatype size, and the
-    operation count that a mapper can lower into PE-block work.
-    """
+    """Canonical GEMM workload recovered from the MLIR/IREE frontend."""
 
     m: int
     n: int

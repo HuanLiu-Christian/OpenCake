@@ -59,10 +59,10 @@ SpatialOp = DefineColorOp | AllocOp | SendOp | ComputeOp
 
 @dataclass(frozen=True, slots=True)
 class OpenCakeProgram:
-    """PE-block spatial execution plan emitted by OpenCake Mapper."""
+    """PE/rank spatial execution plan emitted by the OpenCake mapper."""
 
-    workload: dict[str, int | str]
-    hardware: dict[str, int | float | str]
+    workload: dict[str, object]
+    hardware: dict[str, object]
     ops: tuple[SpatialOp, ...] = field(default_factory=tuple)
 
     def records(self) -> list[dict[str, object]]:

@@ -39,7 +39,7 @@ class OpenCakeBackendResult:
 
 
 class OpenCakeBackend:
-    """Timestamp scheduler for first-pass OpenCake IR timing."""
+    """Boundary-based timestamp scheduler for OpenCake Spatial IR."""
 
     def run(self, program: OpenCakeProgram, hardware: HardwareSpec) -> OpenCakeBackendResult:
         hardware.validate()

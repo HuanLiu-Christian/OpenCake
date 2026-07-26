@@ -5,8 +5,15 @@ __pycache__/
 .pytest_cache/
 dist/
 build/
+*.log
 *.egg-info/
-traces/*.jsonl
+outputs/
+artifacts/
+*.vmfb
 chisel/target/
 chisel/project/target/
+chisel/project/.boot/
+chisel/project/.sbtboot/
 chisel/test_run_dir/
+chisel/.sbt-tmp/
+cpp/opencake_wafer_backend/build/

@@ -1,9 +1,0 @@
-{"dst_addr":4,"op":"h2d_write","words":[11,22,33,44]}
-{"dst_addr":20,"op":"local_copy","src_addr":4,"word_count":4}
-{"op":"d2h_read","src_addr":20,"words":[11,22,33,44]}
-{"op":"expect","src_addr":20,"words":[11]}
-{"op":"expect","src_addr":21,"words":[22]}
-{"op":"expect","src_addr":22,"words":[33]}
-{"op":"expect","src_addr":23,"words":[44]}
-{"dst_addr":12,"op":"h2d_write","words":[101,202,303,404]}
-{"op":"d2h_read","src_addr":12,"words":[101,202,303,404]}
