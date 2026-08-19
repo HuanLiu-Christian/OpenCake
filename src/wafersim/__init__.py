@@ -1,5 +1,6 @@
-"""OpenCake wafer-scale GEMM compiler and simulation toolkit."""
+"""A small, explicit wafer-scale GEMM performance-modeling pipeline."""
 
-__version__ = "0.2.0"
+from .contract import GemmMappingContract
+from .specs import GemmSpec, WaferSpec
 
-__all__ = ["__version__"]
+__all__ = ["GemmMappingContract", "GemmSpec", "WaferSpec"]

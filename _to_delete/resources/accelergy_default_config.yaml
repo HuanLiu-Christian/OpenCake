@@ -1,0 +1,25 @@
+# Stand-in for the "accelergy_default_config.yaml" file that this Docker
+# image is missing.
+#
+# Confirmed by direct inspection of
+# timeloopaccelergy/accelergy-timeloop-infrastructure:latest:
+#   docker run --rm -it --entrypoint bash <image> \
+#     -c "find / -iname '*accelergy*config*'"
+# returns nothing -- the file genuinely does not exist anywhere in the
+# image. When `timeloop-mapper` shells out to `accelergy` to build the
+# Energy Reference Table, accelergy's own first-run bootstrap tries to
+#   cp /usr/local/src/accelergy_default_config.yaml <user config path>
+# to seed a user config the first time it runs. Because the source is
+# missing, that `cp` fails silently, the destination ends up empty/absent,
+# and accelergy then raises "ERROR: key not found: tables, at line: 0"
+# when it tries to read a `tables:` key back out of it.
+#
+# run_timeloop_mapper() in timeloop.py bind-mounts this file, read-only,
+# over the missing source path so the `cp` step succeeds and accelergy
+# finds a `tables:` key to read. The value is intentionally empty: this is
+# NOT a recovered copy of the image's real default per-technology-node
+# energy tables (those were lost when the image was built without them) --
+# it only unblocks accelergy's bootstrap step. Any component energy
+# estimate that would have depended on that missing default table will
+# need explicit ERT/plugin data of its own instead.
+tables: []
