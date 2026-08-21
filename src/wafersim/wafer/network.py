@@ -58,8 +58,16 @@ class PacketNetwork:
     e.g. relaying A east and relaying B north through the same PE in the
     same phase don't serialize behind one shared queue.
 
-    FIFO storage is deliberately treated as fabric state in this project
-    version; it is not subtracted from the PE's data SRAM capacity.
+    FIFO capacity here (fifo_capacity_packets, the depth used by
+    _admit_fifo's backpressure/wait-cycle accounting) is the same real
+    per-PE byte budget that now really occupies part of the PE's declared
+    data SRAM -- see specs.py's WaferSpec.fifo_bytes_per_pe/
+    fifo_router_bytes_per_pe and timeloop.py's generate_timeloop_inputs
+    (fifo_buffer is declared as its own real Accelergy SRAM component and
+    subtracted from pe_scratchpad_depth_words). This class only models the
+    *timing* effect of that fixed capacity (queueing/backpressure); the
+    *area*/SRAM-budget effect is accounted for entirely in specs.py/
+    contract.py/timeloop.py, not here.
     """
 
     def __init__(self, wafer: WaferSpec, rows: int, cols: int) -> None:

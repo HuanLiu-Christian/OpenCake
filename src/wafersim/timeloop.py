@@ -125,14 +125,18 @@ def feasible_tile_k_candidates(
     work, matching the single fully-specified mapping.yaml this project
     hands to timeloop-model for that candidate (see generate_timeloop_
     inputs()) -- and (b) respect this project's real single-buffered per-PE
-    SRAM budget: c_bytes + a_bytes + b_bytes <= wafer.sram_bytes_per_pe
-    (see GemmMappingContract.data_sram_bytes_per_pe -- single-buffered
-    because the real Cerebras CSL task synchronization this project's
-    simulate_gemm() now follows does not prefetch a phase ahead; see that
-    module's docstring). This is the candidate set search.search_tile_k()
-    enumerates: one real timeloop-model Docker run per entry, not a
-    Python-side performance estimate.
+    SRAM budget: c_bytes + a_bytes + b_bytes <= wafer.sram_bytes_per_pe -
+    wafer.fifo_router_bytes_per_pe (see GemmMappingContract.
+    data_sram_bytes_per_pe -- single-buffered because the real Cerebras CSL
+    task synchronization this project's simulate_gemm() now follows does
+    not prefetch a phase ahead; see that module's docstring). The FIFO/
+    router reservation is subtracted here because those buffers now really
+    occupy part of the PE's declared SRAM (see specs.py's
+    fifo_router_bytes_per_pe), not a separate budget. This is the candidate
+    set search.search_tile_k() enumerates: one real timeloop-model Docker
+    run per entry, not a Python-side performance estimate.
     """
+    data_sram_budget = wafer.sram_bytes_per_pe - wafer.fifo_router_bytes_per_pe
     candidates = []
     for tile_k in range(gemm.k, 0, -1):
         if gemm.k % tile_k:
@@ -140,7 +144,7 @@ def feasible_tile_k_candidates(
         a_bytes = tile_m * tile_k * gemm.bytes_per_element
         b_bytes = tile_k * tile_n * gemm.bytes_per_element
         c_bytes = tile_m * tile_n * gemm.bytes_per_element
-        if c_bytes + a_bytes + b_bytes <= wafer.sram_bytes_per_pe:
+        if c_bytes + a_bytes + b_bytes <= data_sram_budget:
             candidates.append(tile_k)
     if not candidates:
         raise ValueError("no GEMM K tile fits the configured PE SRAM")
@@ -201,10 +205,15 @@ def generate_timeloop_inputs(
         a_bytes = tile_m * tile_k * gemm.bytes_per_element
         b_bytes = tile_k * tile_n * gemm.bytes_per_element
         c_bytes = tile_m * tile_n * gemm.bytes_per_element
-        if c_bytes + a_bytes + b_bytes > wafer.sram_bytes_per_pe:
+        # Budget is the raw per-PE SRAM minus what FIFO/router now really
+        # reserve out of it (see feasible_tile_k_candidates' docstring and
+        # specs.py's fifo_router_bytes_per_pe).
+        data_sram_budget = wafer.sram_bytes_per_pe - wafer.fifo_router_bytes_per_pe
+        if c_bytes + a_bytes + b_bytes > data_sram_budget:
             raise ValueError(
                 f"tile_k={tile_k} exceeds the single-buffered PE SRAM budget "
-                f"({c_bytes + a_bytes + b_bytes} > {wafer.sram_bytes_per_pe} bytes)"
+                f"after reserving {wafer.fifo_router_bytes_per_pe} bytes for "
+                f"FIFO/router ({c_bytes + a_bytes + b_bytes} > {data_sram_budget} bytes)"
             )
     k_phases = ceil(gemm.k / tile_k)
     datawidth = gemm.bytes_per_element * 8
@@ -225,10 +234,28 @@ def generate_timeloop_inputs(
     # synchronization does not prefetch a phase ahead (see that module's
     # docstring) -- so TimeLoop's own check already matches this project's
     # real SRAM requirement exactly; the physical SRAM depth can be declared
-    # to TimeLoop directly, with no halving trick needed.
+    # to TimeLoop directly, with no halving trick needed. FIFO/router
+    # storage now really occupies part of this same physical SRAM budget
+    # (wafer.fifo_router_bytes_per_pe -- see specs.py, per the project's
+    # decision that these are not a separate/additional allocation), so
+    # that many bytes are subtracted before converting the remainder to
+    # GEMM-element words; WaferSpec.validate() (called above) already
+    # guarantees this leaves a positive remainder.
     pe_scratchpad_depth_words = max(
-        1, wafer.sram_bytes_per_pe // gemm.bytes_per_element
+        1,
+        (wafer.sram_bytes_per_pe - wafer.fifo_router_bytes_per_pe)
+        // gemm.bytes_per_element,
     )
+    # fifo_buffer/router_buffer are declared as their own real SRAM-class
+    # Accelergy components (see architecture.yaml below) rather than folded
+    # into pe_scratchpad's own depth, so CactiSRAM gives each a real,
+    # separately-attributable area number (see GemmMappingContract.
+    # pe_internal_area_um2). Both use a byte-granular word convention
+    # (block-size 1, word-bits 8, width 8) since they store raw fabric
+    # bytes, not GEMM-typed elements -- unlike pe_scratchpad, whose depth is
+    # in gemm.bytes_per_element-wide words.
+    fifo_buffer_depth_words = max(1, wafer.fifo_bytes_per_pe)
+    router_buffer_depth_words = max(1, wafer.router_bytes_per_pe)
 
     # --- problem.yaml -----------------------------------------------------
     # C[M, N] += A[M, K] * B[K, N], dense (no sparsity modeled here).
@@ -256,7 +283,16 @@ def generate_timeloop_inputs(
     # Native subtree/local hierarchy (NOT the v0.4 nodes:/!Component format,
     # see module docstring): DRAM (off-chip) -> replicated PE[0..active_pes-1]
     # (meshX = active_cols encodes the 2D grid shape) -> per-PE scratchpad
-    # (SRAM) -> per-PE MAC.
+    # (SRAM), fifo_buffer, router_buffer, and mac. fifo_buffer/router_buffer
+    # model the real Cerebras placement of the fabric router and its FIFO
+    # queues INSIDE each PE tile (cerebras.ai's architecture deep-dive: "each
+    # core has a fabric router...5-port design"), each declared as its own
+    # real SRAM-class component so CactiSRAM gives it a real (if
+    # approximate, for router_buffer) area number, same as pe_scratchpad --
+    # see specs.py's WaferSpec.fifo_bytes_per_pe/router_bytes_per_pe for
+    # their sizing and the real citations behind it. Both are byte-granular
+    # (block-size 1, word-bits 8, width 8), unlike pe_scratchpad's GEMM-
+    # element-wide words, since they store raw fabric bytes.
     artifacts.architecture_yaml.write_text(
         "architecture:\n"
         "  version: 0.3\n"
@@ -293,6 +329,22 @@ def generate_timeloop_inputs(
         # convention DRAM already uses.
         f"            width: {datawidth}\n"
         f"            meshX: {active_cols}\n"
+        "        - name: fifo_buffer\n"
+        "          class: SRAM\n"
+        "          attributes:\n"
+        f"            depth: {fifo_buffer_depth_words}\n"
+        "            block-size: 1\n"
+        "            word-bits: 8\n"
+        "            width: 8\n"
+        f"            meshX: {active_cols}\n"
+        "        - name: router_buffer\n"
+        "          class: SRAM\n"
+        "          attributes:\n"
+        f"            depth: {router_buffer_depth_words}\n"
+        "            block-size: 1\n"
+        "            word-bits: 8\n"
+        "            width: 8\n"
+        f"            meshX: {active_cols}\n"
         "        - name: mac\n"
         "          class: intmac\n"
         "          attributes:\n"
@@ -308,13 +360,23 @@ def generate_timeloop_inputs(
     # array (targeting DRAM, the level directly above the PE array, per
     # TimeLoop's convention that a spatial constraint on level X controls
     # how the loops below X are spread across X's children). Keep A/B/C
-    # resident in the per-PE scratchpad (no bypass).
+    # resident in the per-PE scratchpad (no bypass). fifo_buffer/
+    # router_buffer never hold any of this problem's GEMM dataspaces (they
+    # exist purely so Accelergy gives them a real area number -- see
+    # architecture.yaml above); bypass all three there so timeloop-mapper
+    # doesn't try to allocate A/B/C onto them.
     artifacts.architecture_constraints_yaml.write_text(
         "architecture_constraints:\n"
         "  targets:\n"
         "  - target: pe_scratchpad\n"
         "    type: dataspace\n"
         "    keep: [A, B, C]\n"
+        "  - target: fifo_buffer\n"
+        "    type: dataspace\n"
+        "    bypass: [A, B, C]\n"
+        "  - target: router_buffer\n"
+        "    type: dataspace\n"
+        "    bypass: [A, B, C]\n"
         "  - target: DRAM\n"
         "    type: spatial\n"
         "    permutation: NM\n"
@@ -405,6 +467,14 @@ def generate_timeloop_inputs(
         "    type: datatype\n"
         "    keep: [A, B, C]\n"
         "    bypass: []\n"
+        "  - target: fifo_buffer\n"
+        "    type: datatype\n"
+        "    keep: []\n"
+        "    bypass: [A, B, C]\n"
+        "  - target: router_buffer\n"
+        "    type: datatype\n"
+        "    keep: []\n"
+        "    bypass: [A, B, C]\n"
         "  - target: DRAM\n"
         "    type: datatype\n"
         "    keep: [A, B, C]\n"
@@ -730,25 +800,35 @@ def _parse_art_table(art_text: str, art_path: Path) -> dict[str, float]:
     return entries
 
 
-def _pe_internal_area_um2(art_text: str, art_path: Path) -> tuple[float, float]:
-    """Real, per-single-instance mac/pe_scratchpad area out of a real ART.yaml.
+def _pe_internal_area_um2(art_text: str, art_path: Path) -> tuple[float, float, float, float]:
+    """Real, per-single-instance mac/pe_scratchpad/fifo_buffer/router_buffer
+    area out of a real ART.yaml.
 
-    Raises if either leaf is missing -- e.g. because accelergy silently fell
+    Raises if any leaf is missing -- e.g. because accelergy silently fell
     back to its dummy estimator for one of them (the exact failure mode this
     project hit and fixed for energy; see timeloop.py's module history) would
     still produce SOME area entry, just not a trustworthy one, so this alone
     can't catch that case -- but a genuinely absent entry (wrong component
     name, architecture.yaml change not reflected here) is caught rather than
-    silently treated as zero area.
+    silently treated as zero area. fifo_buffer/router_buffer are new as of
+    the FIFO/router-in-PE redesign (see architecture.yaml in generate_
+    timeloop_inputs) -- if CACTI's SRAM estimator can't handle router_
+    buffer's very small declared capacity (5 ports * 4 bytes = 20 bytes; see
+    specs.py's router_bytes_per_pe), that will surface here as a missing
+    entry rather than a silent zero.
     """
     areas = _parse_art_table(art_text, art_path)
-    missing = [name for name in ("mac", "pe_scratchpad") if name not in areas]
+    missing = [
+        name
+        for name in ("mac", "pe_scratchpad", "fifo_buffer", "router_buffer")
+        if name not in areas
+    ]
     if missing:
         raise RuntimeError(
             f"ART.yaml at {art_path} has no area entry for {missing} -- "
             f"found entries: {sorted(areas)}"
         )
-    return areas["mac"], areas["pe_scratchpad"]
+    return areas["mac"], areas["pe_scratchpad"], areas["fifo_buffer"], areas["router_buffer"]
 
 
 _MAP_TARGET_RE = re.compile(
@@ -872,7 +952,7 @@ def parse_mapping_contract(
     )
     stats = artifacts.stats_txt.read_text(encoding="utf-8")
     local_compute_cycles, local_energy_uj = _parse_summary_stats(stats, artifacts.log)
-    mac_area_um2, pe_scratchpad_area_um2 = _pe_internal_area_um2(
+    mac_area_um2, pe_scratchpad_area_um2, fifo_area_um2, router_area_um2 = _pe_internal_area_um2(
         artifacts.art_yaml.read_text(encoding="utf-8"), artifacts.art_yaml
     )
 
@@ -891,6 +971,8 @@ def parse_mapping_contract(
         local_energy_uj=local_energy_uj,
         mac_area_um2=mac_area_um2,
         pe_scratchpad_area_um2=pe_scratchpad_area_um2,
+        fifo_area_um2=fifo_area_um2,
+        router_area_um2=router_area_um2,
     )
     contract.validate()
     return contract

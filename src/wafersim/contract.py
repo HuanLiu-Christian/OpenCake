@@ -34,6 +34,18 @@ class GemmMappingContract:
     # count is done explicitly downstream (see wafer/area.py).
     mac_area_um2: float
     pe_scratchpad_area_um2: float
+    # Real, per-single-instance Accelergy area (um^2) for the FIFO/router
+    # buffers now declared as real SRAM-class components inside the PE's
+    # own architecture.yaml subtree (fifo_buffer/router_buffer -- see
+    # timeloop.py's generate_timeloop_inputs and _pe_internal_area_um2).
+    # Parsed the same real, ART.yaml-derived way as mac_area_um2/
+    # pe_scratchpad_area_um2 above -- router_area_um2 is only an
+    # approximation (a router is not really a memory; see specs.py's
+    # router_ports_per_pe/router_port_bytes comment for the citation basis
+    # of that approximation), but fifo_area_um2 is a real SRAM area number
+    # for a component that genuinely is a buffer.
+    fifo_area_um2: float
+    router_area_um2: float
 
     @property
     def active_pes(self) -> int:
@@ -41,8 +53,15 @@ class GemmMappingContract:
 
     @property
     def pe_internal_area_um2(self) -> float:
-        """Real Accelergy-derived area of ONE PE's mac + pe_scratchpad."""
-        return self.mac_area_um2 + self.pe_scratchpad_area_um2
+        """Real Accelergy-derived area of ONE PE's mac + pe_scratchpad +
+        fifo_buffer + router_buffer -- everything physically inside the PE.
+        """
+        return (
+            self.mac_area_um2
+            + self.pe_scratchpad_area_um2
+            + self.fifo_area_um2
+            + self.router_area_um2
+        )
 
     @property
     def k_phases(self) -> int:
@@ -65,9 +84,16 @@ class GemmMappingContract:
         # Single-buffered A/B (see wafer/simulator.py's simulate_gemm -- real
         # Cerebras CSL GEMM task synchronization does not prefetch a phase
         # ahead, so there is no second A/B slot to budget for here). FIFO
-        # state is modeled as fabric buffering and deliberately excluded
-        # from this budget.
-        return self.c_tile_bytes + self.a_phase_bytes + self.b_phase_bytes
+        # and router storage now really occupy part of the PE's declared
+        # SRAM budget (wafer.fifo_router_bytes_per_pe -- see specs.py), so
+        # the GEMM-data-only figure below is added to that reserved amount
+        # to report what's actually consumed out of wafer.sram_bytes_per_pe.
+        return (
+            self.c_tile_bytes
+            + self.a_phase_bytes
+            + self.b_phase_bytes
+            + self.wafer.fifo_router_bytes_per_pe
+        )
 
     @property
     def data_sram_utilization(self) -> float:
@@ -99,6 +125,8 @@ class GemmMappingContract:
             "local_energy_uj": self.local_energy_uj,
             "mac_area_um2": self.mac_area_um2,
             "pe_scratchpad_area_um2": self.pe_scratchpad_area_um2,
+            "fifo_area_um2": self.fifo_area_um2,
+            "router_area_um2": self.router_area_um2,
             "pe_internal_area_um2": self.pe_internal_area_um2,
             "data_sram_bytes_per_pe": self.data_sram_bytes_per_pe,
             "data_sram_utilization": self.data_sram_utilization,

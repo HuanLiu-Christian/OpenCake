@@ -93,17 +93,21 @@ def _run_mapper_mode(gemm: GemmSpec, wafer: WaferSpec, args: argparse.Namespace)
 
 
 def _print_area(result) -> None:
-    # pe_internal_area_um2 (mac + pe_scratchpad, real Accelergy ART.yaml) is
-    # per ONE PE; interconnect_area_um2_per_pe is OpenCake's own
-    # router/link/FIFO placeholder (0 by default -- see specs.py). Both PE
-    # counts are shown side by side rather than blended into one number --
-    # active_pes is what THIS problem used, mesh_pes is the physical chip.
+    # pe_internal_area_um2 (mac + pe_scratchpad + fifo_buffer + router_buffer,
+    # all real Accelergy ART.yaml numbers -- see contract.py's
+    # pe_internal_area_um2) is per ONE PE; interconnect_area_um2_per_pe is
+    # now ONLY the inter-PE link/wire term, OpenCake's own placeholder
+    # coefficient (0 by default -- see specs.py's link_area_um2_per_pe).
+    # Both PE counts are shown side by side rather than blended into one
+    # number -- active_pes is what THIS problem used, mesh_pes is the
+    # physical chip.
     area = result.area
     print(
-        f"pe_internal_area_um2 (1 PE, real Accelergy): {area.pe_internal_area_um2:.2f}"
+        "pe_internal_area_um2 (1 PE, real Accelergy -- mac+pe_scratchpad+"
+        f"fifo_buffer+router_buffer): {area.pe_internal_area_um2:.2f}"
     )
     print(
-        "interconnect_area_um2_per_pe (1 PE, OpenCake router+link+fifo "
+        "interconnect_area_um2_per_pe (1 PE, OpenCake link-only "
         f"placeholder): {area.interconnect_area_um2_per_pe:.2f}"
     )
     print(

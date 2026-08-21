@@ -29,19 +29,23 @@ class TimeLoopInputGenerationTest(unittest.TestCase):
             artifacts = generate_timeloop_inputs(gemm, wafer, Path(directory))
             plan = json.loads(artifacts.mapping_plan_json.read_text(encoding="ascii"))
 
-        # tile_k=128, not 64: single-buffered A/B (see contract.py's
-        # data_sram_bytes_per_pe -- real Cerebras CSL task synchronization
-        # does not prefetch a phase ahead, so this project no longer
-        # reserves a second A/B slot) roughly doubles how much of the 48 KiB
-        # budget is available per phase versus the old double-buffered
-        # formula, so the largest SRAM-feasible divisor of K=1024 doubles too.
-        self.assertEqual((plan["tile_m"], plan["tile_n"], plan["tile_k"]), (32, 32, 128))
+        # tile_k=64, not 128: FIFO/router now really reserve
+        # wafer.fifo_router_bytes_per_pe (8*8*256 + 5*4 = 16,404 bytes, with
+        # this WaferSpec's defaults) out of the same 48 KiB budget, per the
+        # project's decision that these are not a separate/additional
+        # allocation (see specs.py's fifo_router_bytes_per_pe and
+        # timeloop.py's feasible_tile_k_candidates). That shrinks the
+        # GEMM-data-only budget back down to 49,152 - 16,404 = 32,748 bytes,
+        # so the largest SRAM-feasible divisor of K=1024 is 64 again (128
+        # would need 36,864 data bytes, which no longer fits).
+        self.assertEqual((plan["tile_m"], plan["tile_n"], plan["tile_k"]), (32, 32, 64))
         a_bytes = plan["tile_m"] * plan["tile_k"] * gemm.bytes_per_element
         b_bytes = plan["tile_k"] * plan["tile_n"] * gemm.bytes_per_element
         c_bytes = plan["tile_m"] * plan["tile_n"] * gemm.bytes_per_element
-        data_sram_bytes_per_pe = c_bytes + a_bytes + b_bytes
-        self.assertEqual(data_sram_bytes_per_pe, 36_864)
-        self.assertLessEqual(data_sram_bytes_per_pe, wafer.sram_bytes_per_pe)
+        gemm_data_bytes_per_pe = c_bytes + a_bytes + b_bytes
+        self.assertEqual(gemm_data_bytes_per_pe, 20_480)
+        data_sram_budget = wafer.sram_bytes_per_pe - wafer.fifo_router_bytes_per_pe
+        self.assertLessEqual(gemm_data_bytes_per_pe, data_sram_budget)
 
 
 class WaferGemmPipelineTest(unittest.TestCase):
@@ -78,6 +82,13 @@ class WaferGemmPipelineTest(unittest.TestCase):
             local_energy_uj=0.0,
             mac_area_um2=6628.0,
             pe_scratchpad_area_um2=82504.0,
+            # Synthetic-but-real-shaped, mirroring the real fifo_buffer/
+            # router_buffer SRAM components now declared per PE (see
+            # timeloop.py's generate_timeloop_inputs) -- nonzero so this
+            # test actually exercises pe_internal_area_um2 summing all
+            # four terms, not just the pre-refactor two.
+            fifo_area_um2=1200.0,
+            router_area_um2=400.0,
         )
         result = simulate_gemm(contract)
 
@@ -95,13 +106,17 @@ class WaferGemmPipelineTest(unittest.TestCase):
         self.assertGreater(result.energy.total_uj, 0)
 
         # Area: PE-internal comes straight from the (here, synthetic-but-
-        # real-shaped) contract fields; interconnect defaults to 0 because
-        # WaferSpec's router/link/fifo area coefficients default to 0.0 (see
-        # specs.py) -- so active_pe_array_area_um2 should be exactly
-        # pe_internal_area_um2 * active_pes, and die_pe_array_area_um2
-        # exactly pe_internal_area_um2 * mesh_rows * mesh_cols, with no
-        # interconnect contribution mixed in.
-        self.assertEqual(contract.pe_internal_area_um2, 6628.0 + 82504.0)
+        # real-shaped) contract fields -- now mac + pe_scratchpad +
+        # fifo_area_um2 + router_area_um2, all four folded into one real
+        # per-PE number (see contract.py's pe_internal_area_um2).
+        # interconnect_area_um2_per_pe is now ONLY the link term, which
+        # defaults to 0.0 (see specs.py's link_area_um2_per_pe) since FIFO/
+        # router area is already inside pe_internal_area_um2 -- so
+        # active_pe_array_area_um2 should be exactly pe_internal_area_um2 *
+        # active_pes, and die_pe_array_area_um2 exactly pe_internal_area_um2
+        # * mesh_rows * mesh_cols, with no separate interconnect
+        # contribution mixed in.
+        self.assertEqual(contract.pe_internal_area_um2, 6628.0 + 82504.0 + 1200.0 + 400.0)
         self.assertEqual(result.area.interconnect_area_um2_per_pe, 0.0)
         self.assertEqual(
             result.area.active_pe_array_area_um2,

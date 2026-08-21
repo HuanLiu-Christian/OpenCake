@@ -1,6 +1,6 @@
-# OpenCake 阶段代码详解:simulator.py / network.py / energy.py
+# OpenCake 阶段代码详解:simulator.py / network.py / energy.py / area.py
 
-这三个文件是 `wafersim` 的 **OpenCake 阶段**——拿到 TimeLoop 决定/评估的映射方案(`GemmMappingContract`:每个 PE 负责的 tile_m×tile_n 输出块、tile_k、k_phases,以及 TimeLoop 真实算出的 `local_compute_cycles`/`local_energy_uj`)之后,在 32×32 PE mesh 上做一次**真正的周期级(cycle-level)离散事件仿真**,算出总耗时、网络负载、各项能耗。三者的关系:
+这四个文件是 `wafersim` 的 **OpenCake 阶段**——拿到 TimeLoop 决定/评估的映射方案(`GemmMappingContract`:每个 PE 负责的 tile_m×tile_n 输出块、tile_k、k_phases,TimeLoop 真实算出的 `local_compute_cycles`/`local_energy_uj`,以及自 FIFO/router-in-PE 改动之后新增的 `mac_area_um2`/`pe_scratchpad_area_um2`/`fifo_area_um2`/`router_area_um2` 四项真实面积)之后,在 32×32 PE mesh 上做一次**真正的周期级(cycle-level)离散事件仿真**,算出总耗时、网络负载、各项能耗、各项面积。四者的关系:
 
 ```
 simulator.py  (调度逻辑,谁在第几个 cycle 开始/结束做什么)
@@ -8,11 +8,16 @@ simulator.py  (调度逻辑,谁在第几个 cycle 开始/结束做什么)
      ▼
 network.py    (每一次数据搬运具体经过哪些链路、排了多久队、几点到)
      │ 产出 network summary
-     ▼
-energy.py     (PE 内部能耗直接用 TimeLoop 真实数字,网络/静态能耗用 network.py 统计出的物理量按 pJ 系数换算)
+     ├──────────────────────────────┐
+     ▼                              ▼
+energy.py                       area.py
+(PE 内部能耗直接用 TimeLoop      (PE 内部面积直接用 TimeLoop/Accelergy
+ 真实数字,网络/静态能耗用         真实数字——mac+pe_scratchpad+fifo_buffer+
+ network.py 统计出的物理量        router_buffer 四项;互连面积现在只剩
+ 按 pJ 系数换算)                  link 这一项还是 OpenCake 自己的系数)
 ```
 
-下面按文件逐个讲,并在最后用 `gemm1024_v11` 里真实的最优候选(`tile_k=16, k_phases=64`,来自 7 个候选里 OpenCake 真实选出的最优解)的**真实产出数字**把每一条公式都手算验证一遍——所有数字都跟 `result.json` 严丝合缝对上了,可以直接放进汇报里作为"公式与实现一致"的证据。
+下面按文件逐个讲,并在最后用 `fifo_router_in_pe_check` 里真实的最优候选(`tile_k=64, k_phases=16`,来自 7 个候选里 OpenCake 真实选出的全系统最优解——这次恰好也是贪心会选的那个,原因见 `PIPELINE_SUMMARY.md` 第五节)的**真实产出数字**把每一条公式都手算验证一遍——所有数字都跟 `result.json` 严丝合缝对上了,可以直接放进汇报里作为"公式与实现一致"的证据。
 
 ---
 
@@ -59,14 +64,15 @@ def _extent(start: int, tile: int, limit: int) -> int:
 
 owner 会随 phase 轮换(不是永远从边缘注入),意味着一整个运行下来,每个 PE 都有可能既要接收东边/南边来的数据,也要接收西边/北边来的数据——这正是本项目 SUMMA 算法的真实语义(而不是"DRAM 固定从边缘喂数据"的简化版本),对应的网络实现见下一节 `network.py`。
 
-**状态字典**:
+**状态字典**(现在是三个,不是两个——A、B 各自独立追踪,不共用一个 buffer 时间戳):
 
 ```python
-compute_ready = {(row, col): 0.0 ...}          # 每个 PE 的计算单元下一次空闲的时间
-buffer_ready  = {(row, col, slot): 0.0 ...}    # 每个 PE 的两个缓冲槽(slot 0/1)何时空闲
+compute_ready  = {(row, col): 0.0 ...}   # 每个 PE 的计算单元下一次空闲的时间
+a_buffer_ready = {(row, col): 0.0 ...}   # 每个 PE 的 A 缓冲(唯一一份,不是两个 slot)何时空闲
+b_buffer_ready = {(row, col): 0.0 ...}   # 每个 PE 的 B 缓冲(唯一一份)何时空闲
 ```
 
-`slot = phase % 2` 就是**双缓冲(double buffering)**的实现:偶数阶段用槽 0,奇数阶段用槽 1,槽位每两个阶段轮换复用一次。这样第 `phase+1` 阶段的数据可以在第 `phase-1` 阶段的数据还在被消费时,提前搬进另一个槽——通信和计算因此可以重叠,这正是 TimeLoop 侧把 SRAM 容量声明减半(只允许它规划出单缓冲下能装得下、双缓冲下也能装得下的 tile_k)的原因。
+**这里不是双缓冲**(项目更早的版本是双缓冲,`slot = phase % 2` 轮换两个槽位;现在已经改掉了)。改成单缓冲、任务级同步是照真实 Cerebras CSL 的 GEMM collective benchmark 来的(https://sdk.cerebras.net/csl/code-examples/benchmark-gemm-collectives):它的计算任务在每个 phase 开始前处于"阻塞"状态,等这一 phase 各方向的广播完成回调才解除阻塞开始算,算完之后任务再重新阻塞、等下一 phase 的广播——不存在"下一 phase 的数据提前搬进另一个槽"这种预取重叠。代码里对应的就是:`a_buffer_ready[(row,col)]`/`b_buffer_ready[(row,col)]` 只有在这个 PE 这一 phase 的计算**真正结束**(`end`)时才会被更新,下一 phase 对同一块空间的广播必须等到这个时刻之后才能把数据送到。也因为这样,TimeLoop 侧的 SRAM 预算不再需要"双缓冲、容量减半"这道安全系数——单缓冲下 `pe_scratchpad` 只需要装得下一份 A/B/C 就够了(见 `contract.py` 的 `data_sram_bytes_per_pe`)。
 
 **每个阶段内部**(核心是三段):
 
@@ -88,19 +94,20 @@ start = max(
     a_arrival_by_row[row][(row, col)],   # A 数据到达时刻
     b_arrival_by_col[col][(row, col)],   # B 数据到达时刻
     compute_ready[(row, col)],           # 这个 PE 的计算单元上次何时空闲
-    buffer_ready[(row, col, slot)],      # 这次要用的缓冲槽何时空闲
+    a_buffer_ready[(row, col)],          # A 缓冲(唯一一份)何时空闲
+    b_buffer_ready[(row, col)],          # B 缓冲(唯一一份)何时空闲
 )
 macs = m_extent * n_extent * k_extent
-compute_cycles = ceil(macs / wafer.macs_per_cycle_per_pe)
+compute_cycles = ceil(macs * cycles_per_mac)
 end = start + compute_cycles
 ```
 
-四个依赖取最大值——这是标准的"资源可用时间"建模:数据没到不能算,上一次算的还没算完不能算,缓冲槽还占着不能覆盖写。算完之后更新 `compute_ready`/`buffer_ready` 为 `end`,并把这次的 MAC 数、SRAM 读写字节数(A/B 各算 2 次——写入+读出,C 算 2 次——读改写)累加进全局统计。
+五个依赖取最大值(比双缓冲版本多一个,因为 A、B 各自的缓冲空闲时刻现在分开追踪了)——这是标准的"资源可用时间"建模:数据没到不能算,上一次算的还没算完不能算,A/B 各自的缓冲还占着不能覆盖写。`cycles_per_mac` 不是一个假设的吞吐常数,而是 `contract.local_compute_cycles / (tile_m*tile_n*gemm.k)`——TimeLoop 真实测出的这个映射下每个 PE 全部时间循环的 Cycles,除以同一份映射下每个 PE 真实要做的总 MAC 数,反推出的真实 cycles/MAC 速率(项目早期这里曾经是一个假设的 `wafer.macs_per_cycle_per_pe=32` 常数,和真实架构声明的"每个 PE 只有一个标量 MAC、1 cycle 一次"不符,后来发现并改掉了——真实速率其实是 1.0,不是 32,这也是为什么改完之后 `sim_time_cycles` 比老版本涨了约 28 倍,不是 bug,是修 bug)。算完之后更新 `compute_ready`/`a_buffer_ready`/`b_buffer_ready` 为 `end`,并把这次的 MAC 数、SRAM 读写字节数(A/B 各算 2 次——写入+读出,C 算 2 次——读改写)累加进全局统计。
 
 **循环结束后**:
 
 ```python
-sim_time = max(max(compute_ready.values()), network.latest_cycle)
+sim_time = max(max(compute_ready.values(), default=0.0), network.latest_cycle)
 network_summary = network.summary(sim_time)
 energy = estimate_energy(
     wafer=wafer,
@@ -109,9 +116,14 @@ energy = estimate_energy(
     sim_time_cycles=sim_time,
     active_pes=contract.active_pes,
 )
+area = estimate_area(
+    wafer=wafer,
+    active_pes=contract.active_pes,
+    pe_internal_area_um2=contract.pe_internal_area_um2,   # 同样是 TimeLoop 真实数字
+)
 ```
 
-`sim_time_cycles` 取"所有 PE 里最晚完工的那个"和"网络里最后一个包/FIFO 完成的时刻"两者的较大值——保证即使某条链路上还有包没走完,也不会把仿真时间算短了。这里能看到 `simulate_gemm()` 和 TimeLoop 交接的关键一步:PE 内部能耗直接用 `contract.local_energy_uj`(真实 accelergy 数字),不再用 `mac_operations`/`sram_access_bytes` 乘本地系数。
+`sim_time_cycles` 取"所有 PE 里最晚完工的那个"和"网络里最后一个包/FIFO 完成的时刻"两者的较大值——保证即使某条链路上还有包没走完,也不会把仿真时间算短了。这里能看到 `simulate_gemm()` 和 TimeLoop 交接的关键一步:PE 内部能耗直接用 `contract.local_energy_uj`,PE 内部面积直接用 `contract.pe_internal_area_um2`(两个都是真实 accelergy 数字),不再用 `mac_operations`/`sram_access_bytes` 乘本地系数去估。
 
 ---
 
@@ -230,38 +242,90 @@ static_uj = static_power_mw_per_pe * active_pes * sim_time_cycles / clock_ghz / 
 
 ---
 
-## 四、拿 v11 最优候选(tile_k=16)的真实数字手算验证
+## 四、`area.py` —— 面积核算
 
-参数:`active_rows=active_cols=32`(1024 个 PE)、`tile_m=tile_n=32`、**`tile_k=16`、`k_phases=64`**(这是 OpenCake 从 7 个真实候选里选出来的最优解,不是贪心取最大的 tile_k=64)、`bytes_per_element=4`、`macs_per_cycle_per_pe=32`、`link_bandwidth=32 bytes/cycle`、`packet_payload_bytes=256`。因为 1024 正好被 32 和 16 整除,所有 PE 每阶段拿到的都是满 tile,没有边界截断,所以下面每个公式都能和 `outputs/gemm1024_v11/result.json` **精确对上**,不是估算。
+```python
+@dataclass(frozen=True, slots=True)
+class AreaBreakdown:
+    pe_internal_area_um2: float
+    interconnect_area_um2_per_pe: float
+    active_pes: int
+    mesh_pes: int
+
+    @property
+    def area_um2_per_pe(self) -> float:
+        return self.pe_internal_area_um2 + self.interconnect_area_um2_per_pe
+
+    @property
+    def active_pe_array_area_um2(self) -> float:
+        return self.area_um2_per_pe * self.active_pes
+
+    @property
+    def die_pe_array_area_um2(self) -> float:
+        return self.area_um2_per_pe * self.mesh_pes
+```
+
+结构上和 `energy.py` 是同一个套路:`pe_internal_area_um2` 不是 OpenCake 自己算的,是 `estimate_area()` 调用方(`simulator.py`)直接传进来的 `contract.pe_internal_area_um2`——**FIFO/router-in-PE 这次改动之后,这个数字是 mac + pe_scratchpad + fifo_buffer + router_buffer 四项 Accelergy 真实面积之和**(见 `contract.py`),不再只是 mac + pe_scratchpad 两项。`interconnect_area_um2_per_pe` 现在**只剩 `wafer.link_area_um2_per_pe`** 这一项——FIFO/router 的面积已经真实地并进 `pe_internal_area_um2` 了,`area.py` 里原来那个 `_FIFOS_PER_PE = 8` 常量和 fifo/router 系数项已经删掉,不再重复计算。
+
+```python
+def estimate_area(wafer, *, active_pes, pe_internal_area_um2):
+    interconnect_area_um2_per_pe = wafer.link_area_um2_per_pe
+    return AreaBreakdown(
+        pe_internal_area_um2=pe_internal_area_um2,
+        interconnect_area_um2_per_pe=interconnect_area_um2_per_pe,
+        active_pes=active_pes,
+        mesh_pes=wafer.mesh_rows * wafer.mesh_cols,
+    )
+```
+
+`link_area_um2_per_pe` 默认还是 0.0——不是因为 link 真实面积是零,而是因为 link 是两个相邻 PE 的 router 之间的一段导线,不属于任何单个 PE 的 `architecture.yaml` 子树,Accelergy 没有地方给它一个真实数字,目前也没找到足够精确、可以按"每 PE 分摊"的真实导线面积文献值(见 `specs.py` 里 `link_area_um2_per_pe` 字段上方的注释)。所以现在项目里**唯一还没有真实数字支撑的面积项**就是这一个;PE 内部四项、以及 PE 内部对应的能耗(`local_energy_uj`)都已经是真实 Accelergy/TimeLoop 输出。
+
+两个 PE 数量并排报告,不合并成一个数:`active_pes` 是这次 GEMM 真正用到的 PE 数(`contract.active_pes`)——"这个问题实际用了多少硅片";`mesh_pes` 是物理 wafer 上全部的 PE 数(`wafer.mesh_rows * wafer.mesh_cols`)——芯片的 die 面积在流片时就固定了,不会因为某次问题没用满而变小,所以这是回答"这块芯片有多大"该用的数字。
+
+## 五、拿 `fifo_router_in_pe_check` 最优候选(tile_k=64)的真实数字手算验证
+
+参数:`active_rows=active_cols=32`(1024 个 PE)、`tile_m=tile_n=32`、**`tile_k=64`、`k_phases=16`**(这是 OpenCake 从 7 个真实候选里选出来的全系统最优解——这次恰好也是贪心取最大 tile_k 会选的那个,原因见 `PIPELINE_SUMMARY.md` 第五节,不是巧合是必然)、`bytes_per_element=4`、`cycles_per_mac=1.0`(真实测出来的,不是假设的 32)、`link_bandwidth=32 bytes/cycle`、`packet_payload_bytes=256`。因为 1024 正好被 32 和 64 整除,所有 PE 每阶段拿到的都是满 tile,没有边界截断,所以下面每个公式都能和 `outputs/fifo_router_in_pe_check/result.json` **精确对上**,不是估算。
 
 **1. 计算量与计算耗时**
 
-单个 PE 每阶段:`macs = 32×32×16 = 16,384`,`compute_cycles = ceil(16384/32) = 512`。
+单个 PE 每阶段:`macs = 32×32×64 = 65,536`,`compute_cycles = ceil(65536×1.0) = 65,536`(`cycles_per_mac=1.0` 是精确的整数比,`ceil` 不引入任何多余 cycle)。
 
-- `mac_operations = 1024 PE × 16,384 macs × 64 phases = 1,073,741,824`(= 1024³)—— **与 `result.json` 完全一致**,而且和 tile_k=64 那次(v8/v10)的结果完全相同——因为每个 PE 总 MAC 数只取决于问题规模(`tile_m×tile_n×K`),和 K 怎么切成几个 phase 无关。
-- 单 PE 64 阶段共 `512×64 = 32,768` busy cycles;1024 个 PE 合计 `compute_busy_cycles = 1024×32,768 = 33,554,432` —— **与 `result.json` 完全一致**,同样和 tile_k 无关(`ceil` 在这个规模下总能整除,不产生额外 cycle)。
-- `sim_time_cycles = 33,141`,只比单 PE 的纯计算时间(32,768)多了 373 cycles——比 v8 那次(tile_k=64,多出 814 cycles)反而更少,因为这次每个 phase 的 payload 更小(2,048 字节而不是 8,192),首阶段的"数据还没到达"填充延迟更短。`mean_pe_utilization = 33,554,432 / (1024×33,141) = 98.87%`,是 7 个候选里最高的一档。
+- `mac_operations = 1024 PE × 65,536 macs × 16 phases = 1,073,741,824`(= 1024³)—— **与 `result.json` 完全一致**,而且和 tile_k=16 那个候选的结果完全相同——因为每个 PE 总 MAC 数只取决于问题规模(`tile_m×tile_n×K`),和 K 怎么切成几个 phase 无关。
+- 单 PE 16 阶段共 `65,536×16 = 1,048,576` busy cycles;1024 个 PE 合计 `compute_busy_cycles = 1024×1,048,576 = 1,073,741,824` —— **与 `result.json` 完全一致**。值得指出:这次 `compute_busy_cycles` 和 `mac_operations` 是**同一个数字**——因为 `cycles_per_mac` 精确等于 1.0(真实架构就是 1 cycle/MAC),不像项目早期假设 `macs_per_cycle_per_pe=32` 那会儿,`compute_busy_cycles` 只有 `mac_operations` 的 1/32。
+- `sim_time_cycles = 1,053,650`,只比单 PE 的纯计算时间(1,048,576)多了 5,074 cycles——这部分是 SUMMA 广播的排队/填充延迟,占比不到 0.5%。`mean_pe_utilization = 1,073,741,824 / (1024×1,053,650) = 99.52%`,是 7 个候选里最高的一档(tile_k 越小,这个填充延迟被重复缴纳的次数越多,利用率单调下降,见 `PIPELINE_SUMMARY.md` 第五节的完整对比表)。
 
 **2. 网络负载**
 
-单次行/列广播 payload = `32×16×4 = 2,048` bytes,切成 `2048/256 = 8` 个包。owner 位置随 phase 轮换,但**总跳数只取决于链路长度**(见第二节 2.4 的数学证明):一条广播链总共还是要走 `32-1=31` 跳(东西两个方向加起来)。
+单次行/列广播 payload = `32×64×4 = 8,192` bytes,切成 `8192/256 = 32` 个包。owner 位置随 phase 轮换,但**总跳数只取决于链路长度**(见第二节 2.4 的数学证明):一条广播链总共还是要走 `32-1=31` 跳(东西两个方向加起来)。
 
-- 单次广播的跳数 = `8 包 × 31 跳 = 248`;每阶段有 32 次行广播 + 32 次列广播 = 64 次广播 → `64×248 = 15,872`;64 个阶段 → `15,872×64 = 1,015,808` —— **与 `result.json` 的 `packet_hops` 完全一致**,而且和 v8/v10(tile_k=64)的结果**数值上相同**,印证了第二节里"总跳数与 tile_k 怎么切无关"的结论。
-- 单次广播搬运的总字节(每一跳都要重传一次 2,048 字节)= `2,048×31 = 63,488`;每阶段 64 次广播(32 行 A + 32 列 B)→ `63,488×64 = 4,063,232`;64 阶段 → `4,063,232×64 = 260,046,848` —— **与 `result.json` 的 `link_bytes` 完全一致**,同样和 tile_k=64 那次数值相同。
+- 单次广播的跳数 = `32 包 × 31 跳 = 992`;每阶段有 32 次行广播 + 32 次列广播 = 64 次广播 → `64×992 = 63,488`;16 个阶段 → `63,488×16 = 1,015,808` —— **与 `result.json` 的 `packet_hops` 完全一致**,而且和 tile_k=16 那个候选的结果**数值上相同**,印证了第二节里"总跳数与 tile_k 怎么切无关"的结论。
+- 单次广播搬运的总字节(每一跳都要重传一次 8,192 字节)= `8,192×31 = 253,952`;每阶段 64 次广播(32 行 A + 32 列 B)→ `253,952×64 = 16,252,928`;16 阶段 → `16,252,928×16 = 260,046,848` —— **与 `result.json` 的 `link_bytes` 完全一致**。
 
 **3. SRAM 访问(这一项会随 tile_k 变化,和上面两项不同)**
 
-单 PE 单阶段:`a_bytes=2,048`、`b_bytes=2,048`、`c_bytes=4,096`,按代码 `2×a + 2×b + 2×c = 12,288` bytes;1024 PE × 64 阶段 → `12,288×65,536 = 1,073,741,824` —— **与 `result.json` 的 `sram_access_bytes` 完全一致**,是 v8/v10(tile_k=64,671,088,640)的 1.6 倍——因为 K 切得更细,C 的读改写次数更多,这一项确实会随 tile_k 变化(这也是为什么 TimeLoop 真实的 `local_energy_uj` 里 SRAM 分量理论上应该有极小的差异,只是幅度太小被四舍五入抹平了,见 `PIPELINE_SUMMARY.md` 第五节)。
+单 PE 单阶段:`a_bytes=8,192`、`b_bytes=8,192`、`c_bytes=4,096`,按代码 `2×a + 2×b + 2×c = 40,960` bytes;1024 PE × 16 阶段 → `40,960×16,384 = 671,088,640` —— **与 `result.json` 的 `sram_access_bytes` 完全一致**。K 切得越细(tile_k 越小、phase 越多),C 的读改写次数越多,这一项会相应增大(tile_k=16 那个候选算出来会是这个数字的 1.6 倍)。
 
-**4. 能耗五项(全部用上面验证过的物理量直接代公式)**
+**4. 面积四项(FIFO/router-in-PE 改动之后新增的手算验证)**
+
+| 项 | 来源 | 结果(µm²/PE) | mapping_contract.json |
+|---|---|---|---|
+| mac | TimeLoop/Accelergy 真实 ART.yaml | 6,628.0 | 6628.0 ✓ |
+| pe_scratchpad | 同上 | 106,030.0 | 106030.0 ✓ |
+| fifo_buffer | 同上(新增) | 59,674.0 | 59674.0 ✓ |
+| router_buffer | 同上(新增,近似) | 82.45 | 82.45 ✓ |
+| **pe_internal_area_um2(四项之和)** | | **172,414.45** | **172414.45 ✓** |
+
+`active_pe_array_area_um2 = 172,414.45 × 1,024 = 176,552,396.8` —— 与 `result.json` 的 `area.active_pe_array_area_um2` 完全一致;这次 `active_pes == mesh_pes == 1024`(mesh 正好用满),所以 `die_pe_array_area_um2` 是同一个数字。`interconnect_area_um2_per_pe` 这次是 0.0——`link_area_um2_per_pe` 还没有真实数字,FIFO/router 的面积已经算在上面四项里了,不再重复出现在 interconnect 这一侧。
+
+**5. 能耗五项(全部用上面验证过的物理量直接代公式)**
 
 | 项 | 公式 | 结果 | result.json |
 |---|---|---|---|
-| PE 内部(TimeLoop 真实数字) | 直接取 `contract.local_energy_uj` | 2365.33 µJ | 2365.33 ✓ |
-| FIFO | 520,093,696 × 0.005pJ / 1e6 | 2.60046848 µJ | 2.60046848 ✓ |
-| 路由器 | 260,046,848 × 0.02pJ / 1e6 | 5.20093696 µJ | 5.20093696 ✓ |
-| 导线 | 260,046,848 × 0.01pJ / 1e6 | 2.60046848 µJ | 2.60046848 ✓ |
-| 静态 | 0.005mW×1024×33,141/1.0 /1e6 | 0.16968192 µJ | 0.16968192 ✓ |
-| **总计** | | **2375.90155584 µJ** | **2375.90155584 ✓** |
+| PE 内部(TimeLoop 真实数字) | 直接取 `contract.local_energy_uj` | 26,005.4 µJ | 26005.4 ✓ |
+| FIFO | 520,093,696 × 1.9pJ / 1e6 | 988.1780224 µJ | 988.1780224 ✓ |
+| 路由器 | 260,046,848 × 2.1pJ / 1e6 | 546.0983808 µJ | 546.0983808 ✓ |
+| 导线 | 260,046,848 × 0.7pJ / 1e6 | 182.0327936 µJ | 182.0327936 ✓ |
+| 静态 | 2.0mW×1024×1,053,650/1.0 /1e6 | 2,157.8752 µJ | 2157.8752 ✓ |
+| **总计** | | **29,879.5843968 µJ** | **29879.5843968 ✓** |
 
-`fifo_enqueued_bytes = 2×link_bytes = 520,093,696`(发送+接收各计一次)。五项全部精确对齐,说明代码实现和这里描述的公式完全一致,`result.json` 里的每一个数字都可以从 `mapping_contract.json` 里的映射参数一步步手算复现出来,不存在黑盒或者不可解释的中间步骤——包括现在这个"PE 内部能耗直接来自 TimeLoop 真实 Docker 输出"的新环节。
+`fifo_enqueued_bytes = 2×link_bytes = 520,093,696`(发送+接收各计一次)。五项能耗、四项面积全部精确对齐,说明代码实现和这里描述的公式完全一致,`result.json` 里的每一个数字都可以从 `mapping_contract.json` 里的映射参数一步步手算复现出来,不存在黑盒或者不可解释的中间步骤——包括这次新增的"FIFO/router 面积直接来自 TimeLoop/Accelergy 真实 Docker 输出、能耗系数锚定到真实文献"这两个环节。

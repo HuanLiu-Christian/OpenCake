@@ -1,16 +1,25 @@
 """Transparent on-chip area accounting for the wafer execution model.
 
-Mirrors wafer/energy.py's division of labor: PE-internal (mac +
-pe_scratchpad) area is no longer a made-up coefficient -- it is TimeLoop/
-Accelergy's own real, technology-calibrated per-instance number (see
-GemmMappingContract.pe_internal_area_um2, parsed from a real timeloop run's
-ART.yaml). Router/link/FIFO interconnect area remains OpenCake's own
-analytical domain, via WaferSpec's *_area_um2_per_pe / fifo_area_um2_per_byte
-coefficients -- these default to 0.0 (see specs.py) because, as of this
-writing, no installed Accelergy plug-in (Aladdin/Cacti/mcpat/library) has a
-confirmed calibrated area estimator for NoC routers, links, or FIFOs, so
-there is no real number to report by default; a total computed with the
-defaults left at 0.0 is PE-internal area only, still 100% real.
+Mirrors wafer/energy.py's division of labor, updated for the FIFO/router-
+in-PE redesign: PE-internal area is no longer just mac + pe_scratchpad --
+FIFO and router are now ALSO real SRAM-class Accelergy components declared
+inside the PE's own architecture.yaml subtree (fifo_buffer/router_buffer --
+see timeloop.py's generate_timeloop_inputs), so their area comes from the
+same real, technology-calibrated per-instance ART.yaml numbers as mac/
+pe_scratchpad (see GemmMappingContract.pe_internal_area_um2, which now sums
+all four). router_area_um2 is only an approximation -- a router is not
+really a memory -- but it is a real Accelergy-computed number, not an
+assumed coefficient (see specs.py's router_ports_per_pe comment for the
+citation basis).
+
+Only the wire LINK between two adjacent PEs' routers has no such path: it
+is not owned by a single PE's architecture subtree, so there is nothing for
+Accelergy to estimate per-PE. It remains OpenCake's own analytical
+coefficient, wafer.link_area_um2_per_pe -- defaults to 0.0 (see specs.py)
+because no sufficiently precise real per-PE-attributable wire-area citation
+was found; a total computed with that default left at 0.0 is PE-internal
+area only (mac + pe_scratchpad + fifo_buffer + router_buffer), still 100%
+real.
 
 Two PE counts are reported side by side, not one blended number:
   - active_pes: PEs actually participating in THIS GEMM run (contract.
@@ -26,12 +35,6 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 
 from ..specs import WaferSpec
-
-# Every PE has one independent send + one independent receive FIFO per
-# direction (east/west/south/north) -- see wafer/network.py's
-# PacketNetwork.__init__ and its module docstring (mirrors Cerebras CSL's
-# per-direction fabric queues). 4 directions x 2 (send + receive) = 8 FIFOs.
-_FIFOS_PER_PE = 8
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,18 +78,14 @@ def estimate_area(
 
     ``pe_internal_area_um2`` should be
     ``GemmMappingContract.pe_internal_area_um2`` -- a real accelergy-derived
-    number for ONE PE's mac + pe_scratchpad. Passing anything else (e.g. a
-    placeholder 0.0, as this project's unit tests do for a synthetic
-    contract) is valid but will simply report zero PE-internal area.
+    number for ONE PE's mac + pe_scratchpad + fifo_buffer + router_buffer.
+    Passing anything else (e.g. a placeholder 0.0, as this project's unit
+    tests do for a synthetic contract) is valid but will simply report zero
+    PE-internal area. ``interconnect_area_um2_per_pe`` below is now ONLY the
+    inter-PE link/wire term -- FIFO/router area is already folded into
+    ``pe_internal_area_um2`` (see this module's docstring).
     """
-    fifo_bytes_per_pe = (
-        _FIFOS_PER_PE * wafer.fifo_capacity_packets * wafer.packet_payload_bytes
-    )
-    interconnect_area_um2_per_pe = (
-        wafer.router_area_um2_per_pe
-        + wafer.link_area_um2_per_pe
-        + fifo_bytes_per_pe * wafer.fifo_area_um2_per_byte
-    )
+    interconnect_area_um2_per_pe = wafer.link_area_um2_per_pe
     return AreaBreakdown(
         pe_internal_area_um2=pe_internal_area_um2,
         interconnect_area_um2_per_pe=interconnect_area_um2_per_pe,
