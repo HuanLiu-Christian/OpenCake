@@ -97,6 +97,78 @@ _ENERGY_UNIT_TO_UJ = {
     "j": 1e6,
 }
 
+# CONFIRMED REAL FAILURE MODE (2026-08-23, against a real
+# `outputs/area_budget_check` Docker run): every SRAM-class component this
+# project declares to Accelergy (pe_scratchpad, fifo_buffer, router_buffer
+# -- see architecture.yaml below) is estimated by the real
+# accelergy-cacti-plug-in (cacti_wrapper.py's CactiMemory._interp_size),
+# which computes a CACTI "cache_size" as:
+#   scaled_width = max(ceil(width_bits/8)*8, 32)   # width_bits = word-bits*block-size
+#   cache_size   = scaled_width * depth_words // 8
+# Past some real cache_size (bytes) threshold, CACTI's own C/C++ integer
+# handling breaks down and Accelergy silently returns a near-zero
+# placeholder area for that component instead of erroring -- confirmed by
+# comparing two real runs' actual accelergy.log/ART.yaml: fifo_buffer at
+# fifo_capacity_packets=8 (cache_size=65536) correctly produced a real
+# 59674.0 um^2, while fifo_buffer at fifo_capacity_packets=524288
+# (cache_size=4_294_967_296, exactly 2**32) never even shows a matching
+# "Calling CACTI with cache_size=..." line in the real accelergy log, and
+# the final reported area is a nonsensical 1.0 um^2.
+#
+# SAFE_CACTI_CACHE_SIZE_BYTES is a REASONED, NOT independently confirmed at
+# this exact value, conservative ceiling: 2**24 (16,777,216) -- 128x below
+# the 2**31 boundary a 32-bit *signed* C `int` would overflow at (the most
+# likely real cause, since cacti_wrapper.py writes cache_size as plain text
+# into a CACTI config file for CACTI's own C++ binary to parse), and 256x
+# below the confirmed-broken 2**32. If a future real Docker run confirms a
+# larger cache_size still works, this can be raised with that run's
+# evidence cited here -- until then, every SRAM-class component this
+# project declares is validated against it BEFORE any real Docker call is
+# made (see _validate_cacti_safe_sram below), so an unsafe declaration
+# fails fast and loud in plain Python instead of silently producing a
+# wrong-but-plausible-looking real Docker result. area_budget.py's own
+# search ceilings (_SRAM_KIB_PER_PE_MAX/_FIFO_CAPACITY_PACKETS_MAX) are
+# derived from this SAME constant, so both the automatic area-budget search
+# and any direct --sram-kib/--fifo-packets CLI usage are covered by one
+# single source of truth.
+SAFE_CACTI_CACHE_SIZE_BYTES = 1 << 24
+
+
+def _cacti_cache_size_bytes(word_bits: int, block_size_bytes: int, depth_words: int) -> int:
+    """Mirrors accelergy-cacti-plug-in's cacti_wrapper.py
+    (CactiMemory._interp_size) cache_size computation EXACTLY -- see
+    SAFE_CACTI_CACHE_SIZE_BYTES above for the real data points this was
+    verified against. Kept in lockstep with the word-bits=8/block-size
+    convention each SRAM-class component below is actually declared with."""
+    width_bits = word_bits * block_size_bytes
+    scaled_width_bits = max(-(-width_bits // 8) * 8, 32)  # ceil(width_bits/8)*8, floored at 32
+    return scaled_width_bits * depth_words // 8
+
+
+def _validate_cacti_safe_sram(
+    component_name: str, *, word_bits: int, block_size_bytes: int, depth_words: int
+) -> None:
+    """Raises ValueError BEFORE any real Docker call if `component_name`'s
+    declared depth would imply a real CACTI cache_size past
+    SAFE_CACTI_CACHE_SIZE_BYTES -- see that constant's docstring for why
+    this is necessary: past that point, real CACTI/Accelergy does not
+    error, it silently returns a wrong-but-plausible-looking near-zero
+    area, which nothing downstream (contract.py's validate(), this
+    project's binary searches) can otherwise detect on its own."""
+    cache_size = _cacti_cache_size_bytes(word_bits, block_size_bytes, depth_words)
+    if cache_size > SAFE_CACTI_CACHE_SIZE_BYTES:
+        raise ValueError(
+            f"{component_name}'s declared depth ({depth_words} words, "
+            f"block-size {block_size_bytes} bytes, word-bits {word_bits}) implies "
+            f"a real CACTI cache_size of {cache_size} bytes, above the "
+            f"confirmed-safe ceiling of {SAFE_CACTI_CACHE_SIZE_BYTES} bytes (see "
+            "timeloop.py's SAFE_CACTI_CACHE_SIZE_BYTES comment) -- a real Docker "
+            "run confirmed CACTI silently returns a nonsensical near-zero area "
+            "past this range instead of erroring, so this is rejected up front "
+            "rather than risking a silently-wrong real result. Shrink the "
+            f"configuration that grew {component_name}'s depth this large."
+        )
+
 
 @dataclass(slots=True)
 class TimeLoopArtifacts:
@@ -157,6 +229,74 @@ def _largest_feasible_k(
     return feasible_tile_k_candidates(gemm, wafer, tile_m, tile_n)[0]
 
 
+def _largest_divisor_leq(n: int, upper_bound: int) -> int:
+    """The largest divisor of ``n`` that is ``<= upper_bound`` (and ``>= 1``).
+
+    REAL BUG THIS FIXES (found and root-caused this session, via an actual
+    Docker crash on Qwen3-8B's Q/O-projection GEMM, M=10 N=4096 K=4096,
+    against a wafer mesh derived from a DIFFERENT, larger GEMM in the same
+    model -- the MLP's M=10 N=12288 K=4096): the old code below computed
+    ``active_cols = min(wafer.mesh_cols, gemm.n)`` and then
+    ``tile_n = ceil(gemm.n / active_cols)``, with NO guarantee that
+    ``active_cols * tile_n == gemm.n`` exactly. That product is exactly the
+    real TimeLoop spatial+temporal N factor product architecture_
+    constraints.yaml/mapping.yaml declare -- and real ``timeloop-model``
+    requires it to equal the workload's N dimension EXACTLY, with no
+    boundary/remainder tile (confirmed by a real Docker error this session:
+    "product of all factors of dimension N is 4608, which is not equal to
+    the dimension size of the workload 4096", from mesh_cols=1536 (a true
+    divisor of the MLP's own N=12288, since a SEPARATE WaferSpec-derivation
+    step -- see area_budget.py's ``_derive_mesh`` -- only ever guarantees
+    divisibility against the ONE representative GEMM it was given) not
+    dividing evenly into the Q/O-projection's N=4096).
+
+    This is the SAME real constraint area_budget.py's own ``_derive_mesh``
+    already documents and searches for (see its module docstring's stage 1
+    and its own ``_divisors`` helper, which this function's algorithm
+    mirrors) -- but ``_derive_mesh`` only ever runs ONCE, against a single
+    representative GEMM, to pick mesh_rows/mesh_cols; the resulting
+    WaferSpec is then reused across EVERY GEMM shape a full model
+    composition (like Qwen3-8B's per-layer Q/K/V/O/gate/up/down
+    projections) actually calls, and those other shapes were never
+    guaranteed to share that one representative GEMM's divisors. So the
+    SAME "search real divisors, pick the largest that fits" discipline
+    has to be applied again here, per-GEMM, at the point where THIS
+    specific gemm's active_rows/active_cols get pinned -- not just once,
+    upstream, at wafer-derivation time.
+
+    Real, honest hardware consequence, not swept under the rug: when
+    ``upper_bound`` (the physical mesh_rows/mesh_cols) is not itself a
+    divisor of ``n`` (the GEMM's M/N), this returns a SMALLER divisor,
+    meaning fewer PEs are actually used along that dimension for this
+    particular GEMM -- the remaining mesh rows/columns sit idle for this
+    op's run (this project's fixed one-static-tile-per-PE execution model
+    -- see generate_timeloop_inputs's own module-level docstring reference
+    to wafer/simulator.py -- has no boundary-tile mechanism on the real
+    Docker-facing path, only wafer/simulator.py's own pure-Python model
+    does, via ``_extent()``, per area_budget.py's stage-1 docstring). This
+    under-utilization is real and reported via active_pes/tile_m/tile_n
+    exactly as computed below, not hidden.
+
+    O(sqrt(n)) trial division, same as area_budget.py's ``_divisors`` (n is
+    at most a few hundred thousand for any realistic GEMM dimension in this
+    project, so this is cheap -- no factorization library needed).
+    """
+    if n <= 0 or upper_bound <= 0:
+        raise ValueError(f"_largest_divisor_leq requires positive inputs, got n={n}, upper_bound={upper_bound}")
+    cap = min(n, upper_bound)
+    best = 1
+    i = 1
+    while i * i <= n:
+        if n % i == 0:
+            if i <= cap:
+                best = max(best, i)
+            partner = n // i
+            if partner <= cap:
+                best = max(best, partner)
+        i += 1
+    return best
+
+
 def generate_timeloop_inputs(
     gemm: GemmSpec, wafer: WaferSpec, out_dir: Path, *, tile_k: int | None = None
 ) -> TimeLoopArtifacts:
@@ -192,11 +332,20 @@ def generate_timeloop_inputs(
         log=root / "timeloop.log",
     )
 
-    active_rows = min(wafer.mesh_rows, gemm.m)
-    active_cols = min(wafer.mesh_cols, gemm.n)
+    # REAL FIX (this session, see _largest_divisor_leq's own docstring for
+    # the full root-cause citation): active_rows/active_cols must be TRUE
+    # divisors of gemm.m/gemm.n, not just <= them, or real timeloop-model
+    # rejects the resulting mapping with a "product of all factors ...
+    # not equal to the dimension size of the workload" error whenever the
+    # wafer's mesh size doesn't happen to divide THIS gemm's shape evenly
+    # (which a WaferSpec derived from a DIFFERENT, representative GEMM --
+    # e.g. area_budget.py's derive_wafer_spec_from_area_budget -- cannot
+    # guarantee for every GEMM shape a full model composition later calls).
+    active_rows = _largest_divisor_leq(gemm.m, wafer.mesh_rows)
+    active_cols = _largest_divisor_leq(gemm.n, wafer.mesh_cols)
     active_pes = active_rows * active_cols
-    tile_m = ceil(gemm.m / active_rows)
-    tile_n = ceil(gemm.n / active_cols)
+    tile_m = gemm.m // active_rows  # exact: active_rows is a true divisor of gemm.m
+    tile_n = gemm.n // active_cols  # exact: active_cols is a true divisor of gemm.n
     if tile_k is None:
         tile_k = _largest_feasible_k(gemm, wafer, tile_m, tile_n)
     else:
@@ -256,6 +405,27 @@ def generate_timeloop_inputs(
     # in gemm.bytes_per_element-wide words.
     fifo_buffer_depth_words = max(1, wafer.fifo_bytes_per_pe)
     router_buffer_depth_words = max(1, wafer.router_bytes_per_pe)
+
+    # Pre-flight check, BEFORE any real Docker call: reject any SRAM-class
+    # declaration real CACTI cannot be trusted to model correctly (see
+    # SAFE_CACTI_CACHE_SIZE_BYTES above) with a clear Python ValueError,
+    # rather than risking a real Docker run that silently returns a
+    # wrong-but-plausible-looking near-zero area. Covers this function's
+    # own direct callers (including a plain --sram-kib/--fifo-packets CLI
+    # run, not just area_budget.py's own search, which stays well under
+    # this ceiling by construction but is not the only way to reach here).
+    _validate_cacti_safe_sram(
+        "pe_scratchpad",
+        word_bits=8,
+        block_size_bytes=gemm.bytes_per_element,
+        depth_words=pe_scratchpad_depth_words,
+    )
+    _validate_cacti_safe_sram(
+        "fifo_buffer", word_bits=8, block_size_bytes=1, depth_words=fifo_buffer_depth_words
+    )
+    _validate_cacti_safe_sram(
+        "router_buffer", word_bits=8, block_size_bytes=1, depth_words=router_buffer_depth_words
+    )
 
     # --- problem.yaml -----------------------------------------------------
     # C[M, N] += A[M, K] * B[K, N], dense (no sparsity modeled here).
@@ -611,6 +781,45 @@ def generate_timeloop_inputs(
     return artifacts
 
 
+def _latest_fresh_docker_output(root: Path, pattern: str, *, exclude: Path) -> Path | None:
+    """Find the file matching `pattern` under `root` that the real Docker
+    invocation which JUST RAN actually produced -- excluding `exclude`
+    (always one of artifacts.map_yaml/stats_txt/art_yaml, this project's
+    OWN canonicalized copy destination, never a genuine fresh Docker
+    output) and, among what remains, picking by real filesystem mtime
+    (most recent first) rather than filename.
+
+    CONFIRMED REAL BUG (2026-08-23, against a real re-run into an already-
+    used --out-dir): the previous version of every call site here was
+    `sorted(root.glob(pattern))[0]`, which does NOT exclude the canonical
+    copy -- and alphabetically "resolved.*" (this project's own
+    canonicalized filename) sorts before "timeloop-mapper.*"/
+    "timeloop-model.*" (the real Docker binaries' own output prefix). This
+    project reuses output directories across separate runs (search.py's
+    fixed tile_k_<N> subdirectories in particular -- a second CLI
+    invocation with a DIFFERENT --sram-kib/--fifo-packets/area budget into
+    the SAME --out-dir writes into the exact same tile_k_<N> folders as
+    the first), so once a directory has been used once, `sorted(...)[0]`
+    picked the STALE canonicalized copy from the FIRST run right back up
+    on every subsequent run, silently ignoring that run's genuinely fresh
+    Docker output sitting right next to it. Confirmed against real files:
+    a re-run's `resolved.ART.yaml` still held fifo_buffer area=1.0 (a
+    stale leftover from an earlier, unrelated fifo_capacity_packets
+    config) while the SAME directory's fresh `timeloop-model.ART.yaml`
+    (correct real mtime, correct real content for the actual re-run)
+    reported fifo_buffer area=65197.7 -- and the parsed contract silently
+    used the wrong, stale one. Because Cycles/tile_m/tile_n/tile_k happen
+    to be independent of fifo_capacity_packets in this project's model,
+    this corruption was invisible in the Cycles/energy columns and only
+    showed up in the area numbers -- so a stale re-run can otherwise look
+    completely normal.
+    """
+    candidates = [p for p in root.glob(pattern) if p != exclude]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda p: p.stat().st_mtime)
+
+
 def run_timeloop_mapper(
     artifacts: TimeLoopArtifacts,
     *,
@@ -645,28 +854,25 @@ def run_timeloop_mapper(
             f"timeloop-mapper exited with status {completed.returncode}; see {artifacts.log}"
         )
 
-    map_candidates = sorted(artifacts.root.glob("*.map.yaml"))
-    stats_candidates = sorted(artifacts.root.glob("*.stats.txt"))
-    if not map_candidates or not stats_candidates:
+    map_candidate = _latest_fresh_docker_output(artifacts.root, "*.map.yaml", exclude=artifacts.map_yaml)
+    stats_candidate = _latest_fresh_docker_output(artifacts.root, "*.stats.txt", exclude=artifacts.stats_txt)
+    if map_candidate is None or stats_candidate is None:
         raise RuntimeError(
             f"timeloop-mapper produced no .map.yaml/.stats.txt under {artifacts.root}; see {artifacts.log}"
         )
-    if map_candidates[0] != artifacts.map_yaml:
-        artifacts.map_yaml.write_text(map_candidates[0].read_text(), encoding="utf-8")
-    if stats_candidates[0] != artifacts.stats_txt:
-        artifacts.stats_txt.write_text(stats_candidates[0].read_text(), encoding="utf-8")
+    artifacts.map_yaml.write_text(map_candidate.read_text(), encoding="utf-8")
+    artifacts.stats_txt.write_text(stats_candidate.read_text(), encoding="utf-8")
 
     # Accelergy generates ERT.yaml/ART.yaml as a side effect of every real
     # run alongside stats.txt (confirmed against TimeLoop's own docs); no
     # fallback if it's missing -- that would mean this run's real PE-internal
     # area simply isn't available, not a case to paper over with a guess.
-    art_candidates = sorted(artifacts.root.glob("*.ART.yaml"))
-    if not art_candidates:
+    art_candidate = _latest_fresh_docker_output(artifacts.root, "*.ART.yaml", exclude=artifacts.art_yaml)
+    if art_candidate is None:
         raise RuntimeError(
             f"timeloop-mapper produced no .ART.yaml under {artifacts.root}; see {artifacts.log}"
         )
-    if art_candidates[0] != artifacts.art_yaml:
-        artifacts.art_yaml.write_text(art_candidates[0].read_text(), encoding="utf-8")
+    artifacts.art_yaml.write_text(art_candidate.read_text(), encoding="utf-8")
 
 
 def run_timeloop_model(
@@ -701,23 +907,21 @@ def run_timeloop_model(
             f"timeloop-model exited with status {completed.returncode}; see {artifacts.log}"
         )
 
-    stats_candidates = sorted(artifacts.root.glob("*.stats.txt"))
-    if not stats_candidates:
+    stats_candidate = _latest_fresh_docker_output(artifacts.root, "*.stats.txt", exclude=artifacts.stats_txt)
+    if stats_candidate is None:
         raise RuntimeError(
             f"timeloop-model produced no .stats.txt under {artifacts.root}; see {artifacts.log}"
         )
-    if stats_candidates[0] != artifacts.stats_txt:
-        artifacts.stats_txt.write_text(stats_candidates[0].read_text(), encoding="utf-8")
+    artifacts.stats_txt.write_text(stats_candidate.read_text(), encoding="utf-8")
 
     # Same real accelergy side-effect as run_timeloop_mapper() above -- no
     # fallback if it's missing.
-    art_candidates = sorted(artifacts.root.glob("*.ART.yaml"))
-    if not art_candidates:
+    art_candidate = _latest_fresh_docker_output(artifacts.root, "*.ART.yaml", exclude=artifacts.art_yaml)
+    if art_candidate is None:
         raise RuntimeError(
             f"timeloop-model produced no .ART.yaml under {artifacts.root}; see {artifacts.log}"
         )
-    if art_candidates[0] != artifacts.art_yaml:
-        artifacts.art_yaml.write_text(art_candidates[0].read_text(), encoding="utf-8")
+    artifacts.art_yaml.write_text(art_candidate.read_text(), encoding="utf-8")
 
     # Confirmed against a real run: unlike timeloop-mapper, timeloop-model
     # does NOT re-emit a `*.map.yaml` (it only evaluates the mapping given
@@ -730,11 +934,16 @@ def run_timeloop_model(
     # record that verbatim as the resolved mapping. In this mode OpenCake
     # itself picked tile_k (see search.search_tile_k), not TimeLoop; what
     # TimeLoop's real Docker run contributes here is stats.txt's Cycles/
-    # Energy for that exact, already-known mapping.
-    map_candidates = sorted(artifacts.root.glob("*.map.yaml"))
-    if map_candidates:
-        if map_candidates[0] != artifacts.map_yaml:
-            artifacts.map_yaml.write_text(map_candidates[0].read_text(), encoding="utf-8")
+    # Energy for that exact, already-known mapping. (map_candidate here
+    # should always be None in practice per the above -- kept as a guard,
+    # via the same _latest_fresh_docker_output helper as every other site,
+    # in case a future TimeLoop version ever does emit one; a STALE
+    # leftover *.map.yaml from an earlier run into this same directory
+    # must never be mistaken for one, which is exactly the real bug this
+    # helper's `exclude`+mtime logic fixes -- see its docstring.)
+    map_candidate = _latest_fresh_docker_output(artifacts.root, "*.map.yaml", exclude=artifacts.map_yaml)
+    if map_candidate is not None:
+        artifacts.map_yaml.write_text(map_candidate.read_text(), encoding="utf-8")
     else:
         artifacts.map_yaml.write_text(
             artifacts.model_mapping_yaml.read_text(encoding="utf-8"), encoding="utf-8"

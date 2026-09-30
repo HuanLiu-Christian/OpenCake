@@ -43,8 +43,12 @@ Accelergy-computed area, and they genuinely subtract from the same 48 KiB
 per-PE SRAM budget the GEMM's A/B/C tiles have to fit in (see
 `WaferSpec.fifo_router_bytes_per_pe` in `specs.py`). Only the wire **link**
 between two adjacent PEs' routers stays outside any single PE's declared
-architecture, so it remains an OpenCake-side area/energy placeholder
-coefficient (`link_area_um2_per_pe`, `wire_energy_pj_per_byte_hop`).
+architecture, so Accelergy never computes it; it remains an OpenCake-side
+coefficient (`link_area_um2_per_pe`, `wire_energy_pj_per_byte_hop`) --
+`link_area_um2_per_pe` defaults to a reasoned estimate assembled from real
+cited sources (ITRS wire pitch + the ORION 2.0 link-area formula + a
+real Cerebras-cited PE tile area, see `specs.py`'s field comment), not a
+raw 0.0 placeholder.
 
 ## Install and Run
 

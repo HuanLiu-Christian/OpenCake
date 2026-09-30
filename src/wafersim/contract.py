@@ -63,6 +63,56 @@ class GemmMappingContract:
             + self.router_area_um2
         )
 
+    # ---- compute / memory / network area classification -----------------
+    # A non-overlapping re-bucketing of the same five area terms above (mac,
+    # pe_scratchpad, fifo_buffer, router_buffer, link) into three functional
+    # categories, instead of the "which Accelergy component estimated it"
+    # split used by pe_internal_area_um2/interconnect_area_um2_per_pe. Each
+    # of the five terms is assigned to EXACTLY one category below, so
+    # compute + memory + network == total_area_um2 with no double-counting:
+    #   - compute: mac only (the real Accelergy intmac area).
+    #   - memory:  pe_scratchpad only (the real Accelergy SRAM that holds
+    #     the GEMM A/B/C tiles -- NOT fifo_buffer/router_buffer, even though
+    #     those are also Accelergy SRAM-class components: functionally they
+    #     hold in-flight network packets, not GEMM data, so they belong in
+    #     "network" below).
+    #   - network: fifo_buffer + router_buffer (real Accelergy, SRAM-shaped
+    #     approximations -- see specs.py's router_ports_per_pe comment) plus
+    #     the inter-PE link/wire (wafer.link_area_um2_per_pe -- OpenCake's
+    #     own reasoned estimate, not Accelergy-derived; see specs.py's
+    #     link_area_um2_per_pe comment for its derivation and citations).
+    @property
+    def compute_area_um2(self) -> float:
+        return self.mac_area_um2
+
+    @property
+    def memory_area_um2(self) -> float:
+        return self.pe_scratchpad_area_um2
+
+    @property
+    def network_area_um2(self) -> float:
+        return self.fifo_area_um2 + self.router_area_um2 + self.wafer.link_area_um2_per_pe
+
+    @property
+    def total_area_um2(self) -> float:
+        """compute_area_um2 + memory_area_um2 + network_area_um2, for ONE
+        PE -- equals pe_internal_area_um2 + wafer.link_area_um2_per_pe
+        (the same five terms, just re-bucketed; link is the only term not
+        already inside pe_internal_area_um2)."""
+        return self.compute_area_um2 + self.memory_area_um2 + self.network_area_um2
+
+    @property
+    def compute_area_fraction(self) -> float:
+        return self.compute_area_um2 / self.total_area_um2
+
+    @property
+    def memory_area_fraction(self) -> float:
+        return self.memory_area_um2 / self.total_area_um2
+
+    @property
+    def network_area_fraction(self) -> float:
+        return self.network_area_um2 / self.total_area_um2
+
     @property
     def k_phases(self) -> int:
         return ceil(self.gemm.k / self.tile_k)
@@ -130,4 +180,17 @@ class GemmMappingContract:
             "pe_internal_area_um2": self.pe_internal_area_um2,
             "data_sram_bytes_per_pe": self.data_sram_bytes_per_pe,
             "data_sram_utilization": self.data_sram_utilization,
+            # Non-overlapping compute/memory/network re-bucketing of the
+            # same five area terms above -- see the property comments
+            # above for exactly which term goes in which category. The
+            # three *_area_fraction values always sum to 1.0.
+            "area_breakdown": {
+                "compute_area_um2": self.compute_area_um2,
+                "memory_area_um2": self.memory_area_um2,
+                "network_area_um2": self.network_area_um2,
+                "total_area_um2": self.total_area_um2,
+                "compute_area_fraction": self.compute_area_fraction,
+                "memory_area_fraction": self.memory_area_fraction,
+                "network_area_fraction": self.network_area_fraction,
+            },
         }

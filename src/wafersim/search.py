@@ -24,13 +24,13 @@ or silently substituted.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import ceil
 from pathlib import Path
 
 from .specs import GemmSpec, WaferSpec
 from .timeloop import (
     MODEL_MODE,
     TimeLoopArtifacts,
+    _largest_divisor_leq,
     feasible_tile_k_candidates,
     generate_timeloop_inputs,
     parse_mapping_contract,
@@ -80,10 +80,19 @@ def search_tile_k(
     """
     gemm.validate()
     wafer.validate()
-    active_rows = min(wafer.mesh_rows, gemm.m)
-    active_cols = min(wafer.mesh_cols, gemm.n)
-    tile_m = ceil(gemm.m / active_rows)
-    tile_n = ceil(gemm.n / active_cols)
+    # REAL FIX (this session): must match generate_timeloop_inputs()'s own
+    # active_rows/active_cols exactly (both now real true-divisor searches
+    # via timeloop._largest_divisor_leq, not a plain min()+ceil()) -- see
+    # that function's own inline comment and _largest_divisor_leq's module
+    # docstring for the full real-Docker-crash root cause this fixes. This
+    # local tile_m/tile_n is only used to pick SRAM-feasible tile_k
+    # candidates (feasible_tile_k_candidates); generate_timeloop_inputs()
+    # below independently recomputes the identical active_rows/active_cols/
+    # tile_m/tile_n from the same gemm/wafer, so the two stay consistent.
+    active_rows = _largest_divisor_leq(gemm.m, wafer.mesh_rows)
+    active_cols = _largest_divisor_leq(gemm.n, wafer.mesh_cols)
+    tile_m = gemm.m // active_rows  # exact: active_rows is a true divisor of gemm.m
+    tile_n = gemm.n // active_cols  # exact: active_cols is a true divisor of gemm.n
     candidates = feasible_tile_k_candidates(gemm, wafer, tile_m, tile_n)
 
     evaluated: list[TileKCandidate] = []

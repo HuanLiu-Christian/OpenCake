@@ -278,7 +278,7 @@ def estimate_area(wafer, *, active_pes, pe_internal_area_um2):
     )
 ```
 
-`link_area_um2_per_pe` 默认还是 0.0——不是因为 link 真实面积是零,而是因为 link 是两个相邻 PE 的 router 之间的一段导线,不属于任何单个 PE 的 `architecture.yaml` 子树,Accelergy 没有地方给它一个真实数字,目前也没找到足够精确、可以按"每 PE 分摊"的真实导线面积文献值(见 `specs.py` 里 `link_area_um2_per_pe` 字段上方的注释)。所以现在项目里**唯一还没有真实数字支撑的面积项**就是这一个;PE 内部四项、以及 PE 内部对应的能耗(`local_energy_uj`)都已经是真实 Accelergy/TimeLoop 输出。
+`link_area_um2_per_pe` 现在默认是 **1684.25**——link 是两个相邻 PE 的 router 之间的一段导线,不属于任何单个 PE 的 `architecture.yaml` 子树,Accelergy 没有地方给它一个真实数字,Cerebras 和 DSENT(NoCS 2012)两个真实来源都查过,都没有直接给出可用的每 PE 导线面积。这个默认值是本项目自己拼出来的**复合估算**,但每一步输入都可核实为真实文献值,不是拍脑袋:导线 pitch 取自真实 ITRS 2007 Interconnect Roadmap(Table INTC2a,45nm 节点对应的 2010 年,"Minimum global wiring pitch" = 135nm);总线宽度用 `router_port_bytes=4` 字节(32 bit,同一个真实 Cerebras "32-bit bi-directional interfaces" 引用)代入 ORION 2.0(TVLSI 2012)论文给出的真实导线面积公式 `Arealink = fw×(ww+sw)+sw` 的主项;单跳导线长度用真实 Cerebras 引用的 PE tile 面积 38,000 µm²(cerebras.ai 架构深度解析博客)开方近似成正方形 tile 的边长,每个 PE 分摊半跳;4 个 mesh 方向(不含 router 第 5 个本地端口)各自算一遍再求和,详细推导见 `specs.py` 里 `link_area_um2_per_pe` 字段上方的注释。这仍然是一个**推理组合出来的工程估算**,不是某一篇论文直接发表的单一数字——所以严格说它和 PE 内部四项(纯 Accelergy 真实输出)、`local_energy_uj`(纯 TimeLoop 真实输出)相比,可信度低一档,但已经不再是无引用支撑的占位 0。
 
 两个 PE 数量并排报告,不合并成一个数:`active_pes` 是这次 GEMM 真正用到的 PE 数(`contract.active_pes`)——"这个问题实际用了多少硅片";`mesh_pes` 是物理 wafer 上全部的 PE 数(`wafer.mesh_rows * wafer.mesh_cols`)——芯片的 die 面积在流片时就固定了,不会因为某次问题没用满而变小,所以这是回答"这块芯片有多大"该用的数字。
 
@@ -315,7 +315,7 @@ def estimate_area(wafer, *, active_pes, pe_internal_area_um2):
 | router_buffer | 同上(新增,近似) | 82.45 | 82.45 ✓ |
 | **pe_internal_area_um2(四项之和)** | | **172,414.45** | **172414.45 ✓** |
 
-`active_pe_array_area_um2 = 172,414.45 × 1,024 = 176,552,396.8` —— 与 `result.json` 的 `area.active_pe_array_area_um2` 完全一致;这次 `active_pes == mesh_pes == 1024`(mesh 正好用满),所以 `die_pe_array_area_um2` 是同一个数字。`interconnect_area_um2_per_pe` 这次是 0.0——`link_area_um2_per_pe` 还没有真实数字,FIFO/router 的面积已经算在上面四项里了,不再重复出现在 interconnect 这一侧。
+`active_pe_array_area_um2 = 172,414.45 × 1,024 = 176,552,396.8` —— 与 `outputs/fifo_router_in_pe_check/result.json` 的 `area.active_pe_array_area_um2` 完全一致;这次 `active_pes == mesh_pes == 1024`(mesh 正好用满),所以 `die_pe_array_area_um2` 是同一个数字。**这组数字对应的是 `link_area_um2_per_pe` 还是占位 0.0 时跑的那次真实 Docker 结果**——当时 `interconnect_area_um2_per_pe = 0.0`,`active_pe_array_area_um2` 只有 `pe_internal_area_um2 × active_pes` 一项。现在 `link_area_um2_per_pe` 默认值已经改成 1684.25(见上一节),同样的命令重新跑一次,`interconnect_area_um2_per_pe` 会变成 1684.25,`area_um2_per_pe = 172,414.45 + 1,684.25 = 174,098.70`,`active_pe_array_area_um2` 也会相应变成 `174,098.70 × 1,024 = 178,277,068.8`——这两个新数字目前还只是按 `wafer/area.py` 公式手算出来的,没有用新配置重新跑过真实 Docker 核对,标注为推算值,不是本节其余数字那种"已核对"状态。
 
 **5. 能耗五项(全部用上面验证过的物理量直接代公式)**
 

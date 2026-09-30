@@ -1,0 +1,54 @@
+experiment 2 (memory-primary branch) -- RESUME run (after real Mac reboot). Real state: area=200,000,000 / 400,000,000 / 1,600,000,000 already fully done (not touched here); area=3,200,000,000 (memory_sweep's last area) resuming from real progress on disk. Global trial counter resumes at 47 (real trials 1-46 already exist in /Users/huanliu/Documents/Codex/2026-05-12/wafer-scale-cerebras-simpy-map-hardware/outputs/experiment2_area_sweep/memory_sweep/all_trials.csv).
+
+######################################################################
+# AREA BUDGET 3,200,000,000 um^2 -- memory-primary any-split sweep (GEMM 1024x1024x1024 fixed) -- RESUMING at real step 1/10, ratio 5/5 within that step (ratios before it already have real on-disk results) (4 real per-area trial(s) already on disk, consecutive_step_failures reconstructed as 0)
+######################################################################
+    [area=3,200,000,000 ratio 5/5, comp_share=0.80] compute=0.7600 memory=0.0500 network=0.1900 (sum=1.0000000000) ...
+      -> FAILED in 90268s: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory budget (610.35 um^2) for this GEMM at a 512x512 mesh -- raise wafer_area_budget_um2 or memory_area_fraction, or shrink the compute-derived mesh
+=== [area=3,200,000,000 step 2/10] memory=0.1500 (remainder=0.8500 split across up to 5 ratios) -- started 19:32:47 ===
+    [area=3,200,000,000 ratio 1/5, comp_share=0.20] compute=0.1700 memory=0.1500 network=0.6800 (sum=1.0000000000) ...
+      -> OK in 16971s (mesh 256x256, 19438 cycles, 33397.73 uJ)
+=== [area=3,200,000,000 step 3/10] memory=0.2500 (remainder=0.7500 split across up to 5 ratios) -- started 00:15:38 ===
+    [area=3,200,000,000 ratio 1/5, comp_share=0.20] compute=0.1500 memory=0.2500 network=0.6000 (sum=1.0000000000) ...
+      -> OK in 15257s (mesh 256x256, 19438 cycles, 34098.49 uJ)
+=== [area=3,200,000,000 step 4/10] memory=0.3500 (remainder=0.6500 split across up to 5 ratios) -- started 04:29:55 ===
+    [area=3,200,000,000 ratio 1/5, comp_share=0.20] compute=0.1300 memory=0.3500 network=0.5200 (sum=1.0000000000) ...
+      -> OK in 4966s (mesh 128x256, 36836 cycles, 33768.99 uJ)
+=== [area=3,200,000,000 step 5/10] memory=0.4500 (remainder=0.5500 split across up to 5 ratios) -- started 05:52:41 ===
+    [area=3,200,000,000 ratio 1/5, comp_share=0.20] compute=0.1100 memory=0.4500 network=0.4400 (sum=1.0000000000) ...
+      -> OK in 1026s (mesh 128x256, 36836 cycles, 36738.75 uJ)
+=== [area=3,200,000,000 step 6/10] memory=0.5500 (remainder=0.4500 split across up to 5 ratios) -- started 06:09:47 ===
+    [area=3,200,000,000 ratio 1/5, comp_share=0.20] compute=0.0900 memory=0.5500 network=0.3600 (sum=1.0000000000) ...
+      -> OK in 1034s (mesh 128x256, 36836 cycles, 37916.18 uJ)
+=== [area=3,200,000,000 step 7/10] memory=0.6500 (remainder=0.3500 split across up to 5 ratios) -- started 06:27:01 ===
+    [area=3,200,000,000 ratio 1/5, comp_share=0.20] compute=0.0700 memory=0.6500 network=0.2800 (sum=1.0000000000) ...
+      -> OK in 1145s (mesh 128x256, 36836 cycles, 38867.75 uJ)
+=== [area=3,200,000,000 step 8/10] memory=0.7500 (remainder=0.2500 split across up to 5 ratios) -- started 06:46:06 ===
+    [area=3,200,000,000 ratio 1/5, comp_share=0.20] compute=0.0500 memory=0.7500 network=0.2000 (sum=1.0000000000) ...
+      -> OK in 1571s (mesh 128x128, 68642 cycles, 37998.14 uJ)
+=== [area=3,200,000,000 step 9/10] memory=0.8500 (remainder=0.1500 split across up to 5 ratios) -- started 07:12:18 ===
+    [area=3,200,000,000 ratio 1/5, comp_share=0.20] compute=0.0300 memory=0.8500 network=0.1200 (sum=1.0000000000) ...
+      -> OK in 4191s (mesh 64x128, 134637 cycles, 43787.34 uJ)
+=== [area=3,200,000,000 step 10/10] memory=0.9500 (remainder=0.0500 split across up to 5 ratios) -- started 08:22:09 ===
+    [area=3,200,000,000 ratio 1/5, comp_share=0.20] compute=0.0100 memory=0.9500 network=0.0400 (sum=1.0000000000) ...
+      -> OK in 3585s (mesh 64x64, 265069 cycles, 51091.66 uJ)
+
+=== [area=3,200,000,000] summary (real steps 1-10; steps before 1 reconstructed from the real data already on disk): memory 5%->95%, compute+network always summing to exactly (1 - memory), whichever of [0.2, 0.35, 0.5, 0.65, 0.8] compute-share ratios was first to work at each step (GEMM 1024x1024x1024 fixed) ===
+step    memory  compute  network comp_share      mesh  sram_kib fifo_pkts  sim_time_cycles  total_energy_uj
+1       0.0500   ALL 5 RATIOS FAILED -- last tried comp_share=0.80: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory
+2       0.1500   0.1700   0.6800       0.20   256x256        10         4            19438       33397.7348
+3       0.2500   0.1500   0.6000       0.20   256x256        11         4            19438       34098.4948
+4       0.3500   0.1300   0.5200       0.20   128x256        24         7            36836       33768.9933
+5       0.4500   0.1100   0.4400       0.20   128x256        23         5            36836       36738.7533
+6       0.5500   0.0900   0.3600       0.20   128x256        27         5            36836       37916.1833
+7       0.6500   0.0700   0.2800       0.20   128x256        26         3            36836       38867.7533
+8       0.7500   0.0500   0.2000       0.20   128x128        53         5            68642       37998.1423
+9       0.8500   0.0300   0.1200       0.20    64x128       109         6           134637       43787.3398
+10      0.9500   0.0100   0.0400       0.20     64x64       236         4           265069       51091.6585
+
+[area=3,200,000,000] done -- every real trial for this area budget logged at /Users/huanliu/Documents/Codex/2026-05-12/wafer-scale-cerebras-simpy-map-hardware/outputs/experiment2_area_sweep/memory_sweep/area_3200000000/trials.csv
+
+======================================================================
+RESUME RUN DONE (memory-primary branch). Combined real results (every trial, every area, including every pre-reboot row) at /Users/huanliu/Documents/Codex/2026-05-12/wafer-scale-cerebras-simpy-map-hardware/outputs/experiment2_area_sweep/memory_sweep/all_trials.csv
+(the 800M um^2 point is separately at ../outputs/area_sweep_memory_any_split_800M/trials.csv, same schema minus the area_budget_um2 column -- treat that as area_budget_um2=800000000)
+======================================================================

@@ -1,0 +1,57 @@
+=== [step 1/13] memory=0.3333 (remainder=0.6667 split across up to 5 ratios) -- started 16:41:05 ===
+    [ratio 1/5, compute_share=0.20] compute=0.1333 memory=0.3333 network=0.5333 (sum=1.0000000000) ...
+      -> OK in 204s (mesh 32x64, 529704 cycles, 25147.17 uJ)
+=== [step 2/13] memory=0.3500 (remainder=0.6500 split across up to 5 ratios) -- started 16:44:29 ===
+    [ratio 1/5, compute_share=0.20] compute=0.1300 memory=0.3500 network=0.5200 (sum=1.0000000000) ...
+      -> OK in 205s (mesh 32x64, 529704 cycles, 25147.17 uJ)
+=== [step 3/13] memory=0.4000 (remainder=0.6000 split across up to 5 ratios) -- started 16:47:54 ===
+    [ratio 1/5, compute_share=0.20] compute=0.1200 memory=0.4000 network=0.4800 (sum=1.0000000000) ...
+      -> OK in 204s (mesh 32x64, 529704 cycles, 27716.95 uJ)
+=== [step 4/13] memory=0.4500 (remainder=0.5500 split across up to 5 ratios) -- started 16:51:19 ===
+    [ratio 1/5, compute_share=0.20] compute=0.1100 memory=0.4500 network=0.4400 (sum=1.0000000000) ...
+      -> OK in 204s (mesh 32x64, 529704 cycles, 28029.84 uJ)
+=== [step 5/13] memory=0.5000 (remainder=0.5000 split across up to 5 ratios) -- started 16:54:43 ===
+    [ratio 1/5, compute_share=0.20] compute=0.1000 memory=0.5000 network=0.4000 (sum=1.0000000000) ...
+      -> OK in 213s (mesh 32x64, 529538 cycles, 28656.20 uJ)
+=== [step 6/13] memory=0.5500 (remainder=0.4500 split across up to 5 ratios) -- started 16:58:16 ===
+    [ratio 1/5, compute_share=0.20] compute=0.0900 memory=0.5500 network=0.3600 (sum=1.0000000000) ...
+      -> OK in 223s (mesh 32x64, 529538 cycles, 29169.27 uJ)
+=== [step 7/13] memory=0.6000 (remainder=0.4000 split across up to 5 ratios) -- started 17:01:59 ===
+    [ratio 1/5, compute_share=0.20] compute=0.0800 memory=0.6000 network=0.3200 (sum=1.0000000000) ...
+      -> OK in 319s (mesh 32x64, 529538 cycles, 29782.02 uJ)
+=== [step 8/13] memory=0.6500 (remainder=0.3500 split across up to 5 ratios) -- started 17:07:18 ===
+    [ratio 1/5, compute_share=0.20] compute=0.0700 memory=0.6500 network=0.2800 (sum=1.0000000000) ...
+      -> OK in 219s (mesh 32x64, 529538 cycles, 30088.44 uJ)
+=== [step 9/13] memory=0.7000 (remainder=0.3000 split across up to 5 ratios) -- started 17:10:57 ===
+    [ratio 1/5, compute_share=0.20] compute=0.0600 memory=0.7000 network=0.2400 (sum=1.0000000000) ...
+      -> OK in 1893s (mesh 32x32, 1053650 cycles, 31889.95 uJ)
+=== [step 10/13] memory=0.7500 (remainder=0.2500 split across up to 5 ratios) -- started 17:42:30 ===
+    [ratio 1/5, compute_share=0.20] compute=0.0500 memory=0.7500 network=0.2000 (sum=1.0000000000) ...
+      -> OK in 227s (mesh 32x32, 1053650 cycles, 32090.91 uJ)
+=== [step 11/13] memory=0.8000 (remainder=0.2000 split across up to 5 ratios) -- started 17:46:17 ===
+    [ratio 1/5, compute_share=0.20] compute=0.0400 memory=0.8000 network=0.1600 (sum=1.0000000000) ...
+      -> OK in 1207s (mesh 32x32, 1053650 cycles, 32090.85 uJ)
+=== [step 12/13] memory=0.8500 (remainder=0.1500 split across up to 5 ratios) -- started 18:06:24 ===
+    [ratio 1/5, compute_share=0.20] compute=0.0300 memory=0.8500 network=0.1200 (sum=1.0000000000) ...
+      -> OK in 231s (mesh 16x32, 2106534 cycles, 39178.15 uJ)
+=== [step 13/13] memory=0.9000 (remainder=0.1000 split across up to 5 ratios) -- started 18:10:15 ===
+    [ratio 1/5, compute_share=0.20] compute=0.0200 memory=0.9000 network=0.0800 (sum=1.0000000000) ...
+      -> OK in 232s (mesh 16x32, 2106534 cycles, 39937.42 uJ)
+
+=== summary: memory increasing from the 1/3 baseline, compute+network always summing to exactly (1 - memory), whichever of [0.2, 0.35, 0.5, 0.65, 0.8] compute-share ratios was first to work at each step (area budget 200000000 um^2) ===
+step    memory  compute  network comp_share      mesh  sram_kib fifo_pkts  sim_time_cycles  total_energy_uj
+1       0.3333   0.1333   0.5333       0.20     32x64        24         7           529704       25147.1738
+2       0.3500   0.1300   0.5200       0.20     32x64        24         7           529704       25147.1738
+3       0.4000   0.1200   0.4800       0.20     32x64        24         6           529704       27716.9538
+4       0.4500   0.1100   0.4400       0.20     32x64        23         5           529704       28029.8438
+5       0.5000   0.1000   0.4000       0.20     32x64        25         5           529538       28656.2038
+6       0.5500   0.0900   0.3600       0.20     32x64        27         5           529538       29169.2738
+7       0.6000   0.0800   0.3200       0.20     32x64        27         4           529538       29782.0238
+8       0.6500   0.0700   0.2800       0.20     32x64        26         3           529538       30088.4438
+9       0.7000   0.0600   0.2400       0.20     32x32        54         6          1053650       31889.9544
+10      0.7500   0.0500   0.2000       0.20     32x32        53         5          1053650       32090.9144
+11      0.8000   0.0400   0.1600       0.20     32x32        51         4          1053650       32090.8544
+12      0.8500   0.0300   0.1200       0.20     16x32       109         6          2106534       39178.1515
+13      0.9000   0.0200   0.0800       0.20     16x32       112         4          2106534       39937.4215
+
+done -- every real trial (all ratios, all memory values) logged at outputs/area_budget_memory_sweep_any_split/trials.csv

@@ -3,3 +3,6 @@ __pycache__/
 .venv/
 outputs/
 timeloop-output/
+.DS_Store
+_to_delete/
+Claude outputs/

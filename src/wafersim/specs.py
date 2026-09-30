@@ -62,17 +62,44 @@ class WaferSpec:
     # part of the PE's declared SRAM depth -- see fifo_router_bytes_per_pe
     # below and timeloop.py's pe_scratchpad_depth_words derivation.
     #
-    # Only `link` has no such path: a link is the wire BETWEEN two PEs'
-    # routers, not something owned by a single PE's architecture subtree,
-    # so there is nothing to declare per-PE in Accelergy for it. It stays a
-    # configurable OpenCake placeholder, still 0.0 -- not because no
-    # citable data exists for wire area (unlike router/FIFO, real NoC wire
-    # area studies do exist), but because no single-hop, per-PE-attributable
-    # figure was found precise enough to state as "real" here; fill in a
-    # cited value (e.g. from a DSENT/Orion NoC area study, or a real wire
-    # pitch x real per-PE tile pitch at your technology node) when you have
-    # one.
-    link_area_um2_per_pe: float = 0.0
+    # Only `link` has no Accelergy path: a link is the wire BETWEEN two PEs'
+    # routers, not something owned by a single PE's architecture subtree, so
+    # there is nothing to declare per-PE in Accelergy for it. It stays a
+    # configurable OpenCake coefficient, but is no longer 0.0 -- neither
+    # Cerebras (checked directly: no published router or wire area figure)
+    # nor the DSENT NoCS 2012 paper (checked directly: gives a real router
+    # area but explicitly states "link area simply is not a primary metric"
+    # and reports none) publish a single ready-to-use number, so this value
+    # is this project's own composite estimate built ONLY from real, cited
+    # inputs, not a fabricated guess:
+    #   - wire pitch: real ITRS 2007 Interconnect Roadmap, Table INTC2a
+    #     ("MPU Interconnect Technology Requirements -- Near-term Years"),
+    #     2010 production year (DRAM 1/2 pitch = 45nm node, matching this
+    #     project's technology_node): "Minimum global wiring pitch" =
+    #     135 nm = 0.135 um/bit-track.
+    #   - bus width: fw=32 bits, matching router_port_bytes=4 bytes above
+    #     (the same real-cited Cerebras "32-bit bi-directional interfaces"
+    #     figure), using the ORION 2.0 (TVLSI 2012) link-area formula's
+    #     leading term Arealink = fw * (ww + sw) + sw with ww+sw = the ITRS
+    #     pitch above (the paper gives the formula but no numeric ww/sw
+    #     split or worked example, so the +sw remainder term, <2% of the
+    #     total, is dropped): 32 bits * 0.135 um = 4.32 um of wire width per
+    #     mesh direction.
+    #   - per-hop wire length: real Cerebras-cited PE tile area = 38,000
+    #     um^2 ("Cerebras Architecture Deep Dive", cerebras.ai) -- Cerebras
+    #     does not publish tile width/height separately, so this project
+    #     ASSUMES a square tile (side = sqrt(38000) = 194.94 um) as the
+    #     center-to-center hop length, and attributes half of each hop
+    #     (97.47 um) to this PE, the other half to its neighbor.
+    #   - directions: 4 mesh neighbors (N/S/E/W); the router's 5th port is
+    #     local injection/ejection into this PE's own compute engine (see
+    #     router_ports_per_pe above), not an inter-PE wire, so it is
+    #     excluded here.
+    #   4 * (32 bits * 0.135 um/bit) * (sqrt(38000 um^2) / 2) = 1684.25 um^2
+    # This is a reasoned engineering estimate assembled from real citations,
+    # not an independently-published single number -- replace it if a
+    # direct real per-PE link/wire area figure is ever found.
+    link_area_um2_per_pe: float = 1684.25
 
     # fifo_energy_pj_per_byte / router_energy_pj_per_byte_hop /
     # wire_energy_pj_per_byte_hop: TimeLoop/Accelergy structurally CANNOT

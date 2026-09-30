@@ -1,0 +1,37 @@
+experiment 2 (network-primary branch) -- RESUME run. Real state: area=200,000,000 and area=400,000,000 already fully done (not touched here); area=1,600,000,000 resuming from real step 8; then [3200000000] (never started before). Global trial counter resumes at 56 (real trials 1-55 already exist in /Users/huanliu/Documents/Codex/2026-05-12/wafer-scale-cerebras-simpy-map-hardware/outputs/experiment2_area_sweep/network_sweep/all_trials.csv).
+
+######################################################################
+# AREA BUDGET 1,600,000,000 um^2 -- network-primary any-split sweep (GEMM 1024x1024x1024 fixed) -- RESUMING from real step 8/10 (15 real per-area trial(s) already on disk, consecutive_step_failures reconstructed as 0)
+######################################################################
+=== [area=1,600,000,000 step 8/10] network=0.7500 (remainder=0.2500 split across up to 5 ratios) -- started 12:37:58 ===
+    [area=1,600,000,000 ratio 1/5, comp_share=0.20] compute=0.0500 memory=0.2000 network=0.7500 (sum=1.0000000000) ...
+      -> OK in 310s (mesh 64x128, 134942 cycles, 30576.73 uJ)
+=== [area=1,600,000,000 step 9/10] network=0.8500 (remainder=0.1500 split across up to 5 ratios) -- started 12:43:08 ===
+    [area=1,600,000,000 ratio 1/5, comp_share=0.20] compute=0.0300 memory=0.1200 network=0.8500 (sum=1.0000000000) ...
+      -> OK in 275s (mesh 64x64, 265410 cycles, 29290.39 uJ)
+=== [area=1,600,000,000 step 10/10] network=0.9500 (remainder=0.0500 split across up to 5 ratios) -- started 12:47:42 ===
+    [area=1,600,000,000 ratio 1/5, comp_share=0.20] compute=0.0100 memory=0.0400 network=0.9500 (sum=1.0000000000) ...
+      -> OK in 240s (mesh 32x64, 529704 cycles, 24801.88 uJ)
+
+=== [area=1,600,000,000] summary (real steps 1-10; steps before 8 reconstructed from the real data already on disk): network 5%->95%, compute+memory always summing to exactly (1 - network), whichever of [0.2, 0.35, 0.5, 0.65, 0.8] compute-share ratios was first to work at each step (GEMM 1024x1024x1024 fixed) ===
+step   network  compute   memory comp_share      mesh  sram_kib fifo_pkts  sim_time_cycles  total_energy_uj
+1       0.0500   ALL 5 RATIOS FAILED -- last tried comp_share=0.80: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory
+2       0.1500   ALL 5 RATIOS FAILED -- last tried comp_share=0.80: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory
+3       0.2500   0.1500   0.6000       0.20   128x256        11         1            36836       33395.9333
+4       0.3500   0.1300   0.5200       0.20   128x128        26         5            68642       33660.3823
+5       0.4500   0.1100   0.4400       0.20   128x128        23         5            68642       32811.9323
+6       0.5500   0.0900   0.3600       0.20   128x128        24         7            68642       29880.8723
+7       0.6500   0.0700   0.2800       0.20   128x128        24         8            68642       29154.6923
+8       0.7500   0.0500   0.2000       0.20    64x128        54        21           134942       30576.7269
+9       0.8500   0.0300   0.1200       0.20     64x64       118        52           265410       29290.3919
+10      0.9500   0.0100   0.0400       0.20     32x64       247       119           529704       24801.8838
+
+[area=1,600,000,000] done -- every real trial for this area budget logged at /Users/huanliu/Documents/Codex/2026-05-12/wafer-scale-cerebras-simpy-map-hardware/outputs/experiment2_area_sweep/network_sweep/area_1600000000/trials.csv
+
+######################################################################
+# AREA BUDGET 3,200,000,000 um^2 -- network-primary any-split sweep (GEMM 1024x1024x1024 fixed)
+######################################################################
+=== [area=3,200,000,000 step 1/10] network=0.0500 (remainder=0.9500 split across up to 5 ratios) -- started 12:51:42 ===
+    [area=3,200,000,000 ratio 1/5, comp_share=0.20] compute=0.1900 memory=0.7600 network=0.0500 (sum=1.0000000000) ...
+      -> FAILED in 4393s: ValueError: no fifo_capacity_packets in [1, 2048] fits the per-PE network budget (2441.41 um^2) for this GEMM at a 256x256 mesh -- raise wafer_area_budget_um2 or network_area_fraction, or shrink the compute-derived mesh
+    [area=3,200,000,000 ratio 2/5, comp_share=0.35] compute=0.3325 memory=0.6175 network=0.0500 (sum=1.0000000000) ...

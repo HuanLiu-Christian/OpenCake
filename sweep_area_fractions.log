@@ -1,0 +1,38 @@
+=== [1/10] c03_m62_n35: compute=0.03 memory=0.62 network=0.35 -- started Mon Aug 24 15:53:25 EDT 2026 ===
+    -> OK in 237s, extracting real results
+=== [2/10] c05_m70_n25: compute=0.05 memory=0.70 network=0.25 -- started Mon Aug 24 15:57:22 EDT 2026 ===
+    -> OK in 1135s, extracting real results
+=== [3/10] c05_m45_n50: compute=0.05 memory=0.45 network=0.50 -- started Mon Aug 24 16:16:17 EDT 2026 ===
+    -> OK in 216s, extracting real results
+=== [4/10] c05_m80_n15: compute=0.05 memory=0.80 network=0.15 -- started Mon Aug 24 16:19:53 EDT 2026 ===
+    -> OK in 237s, extracting real results
+=== [5/10] c05_m20_n75: compute=0.05 memory=0.20 network=0.75 -- started Mon Aug 24 16:23:51 EDT 2026 ===
+    -> OK in 195s, extracting real results
+=== [6/10] c15_m50_n35: compute=0.15 memory=0.50 network=0.35 -- started Mon Aug 24 16:27:06 EDT 2026 ===
+    -> OK in 350s, extracting real results
+=== [7/10] c20_m40_n40: compute=0.20 memory=0.40 network=0.40 -- started Mon Aug 24 16:32:56 EDT 2026 ===
+    -> OK in 539s, extracting real results
+=== [8/10] c30_m40_n30: compute=0.30 memory=0.40 network=0.30 -- started Mon Aug 24 16:41:55 EDT 2026 ===
+    -> FAILED after 201s -- see outputs/area_budget_sweep/c30_m40_n30.log, skipping this combo
+=== [9/10] c10_m45_n45: compute=0.10 memory=0.45 network=0.45 -- started Mon Aug 24 16:45:16 EDT 2026 ===
+    -> OK in 1031s, extracting real results
+=== [10/10] c33_m33_n34: compute=0.33 memory=0.33 network=0.34 -- started Mon Aug 24 17:02:27 EDT 2026 ===
+    -> OK in 358s, extracting real results
+
+=== all 10 combos attempted, ranking by real sim_time_cycles + total_energy_uj ===
+combo             compute   memory  network      mesh  sram_kib fifo_pkts  sim_time_cycles  total_energy_uj  t_rank  e_rank  avg_rank     sat?
+c33_m33_n34          0.33     0.33     0.34    64x128         4         1           137218       23967.6669       1       1       1.0         
+c15_m50_n35          0.15     0.50     0.35     64x64        11         2           265410       25113.3419       2       3       2.5         
+c20_m40_n40          0.20     0.40     0.40     64x64         9         2           266362       24389.4307       3       2       2.5         
+c10_m45_n45          0.10     0.45     0.45     32x64        23         5           529704       28029.8438       4       5       4.5         
+c05_m70_n25          0.05     0.70     0.25     32x32        56         7          1053650       31889.9744       5       7       6.0         
+c05_m45_n50          0.05     0.45     0.50     32x32        53        14          1053650       28514.5144       6       6       6.0         
+c05_m20_n75          0.05     0.20     0.75     32x32        54        21          1055018       26769.5161       8       4       6.0         
+c05_m80_n15          0.05     0.80     0.15     32x32        51         4          1053650       32090.8544       7       8       7.5         
+c03_m62_n35          0.03     0.62     0.35     16x32       103        19          2106534       35701.6515       9       9       9.0         
+
+BEST (lowest avg of time-rank + energy-rank): c33_m33_n34
+  compute=0.33 memory=0.33 network=0.34
+  sim_time_cycles=137218, total_energy_uj=23967.6669
+
+done -- full summary at outputs/area_budget_sweep/summary.csv

@@ -1,0 +1,283 @@
+experiment 1 (memory-primary branch): area budget fixed at 800000000 um^2, matrix size varies over [128, 256, 512, 2048, 4096] (M=N=K, square) ...
+
+######################################################################
+# GEMM SIZE 128x128x128 -- memory-primary any-split sweep
+######################################################################
+=== [gemm=128 step 1/10] memory=0.0500 (remainder=0.9500 split across up to 5 ratios) -- started 22:25:36 ===
+    [gemm=128 ratio 1/5, comp_share=0.20] compute=0.1900 memory=0.0500 network=0.7600 (sum=1.0000000000) ...
+      -> FAILED in 108s: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory budget (2441.41 um^2) for this GEMM at a 128x128 mesh -- raise wafer_area_budget_um2 or memory_area_fraction, or shrink the compute-derived mesh
+    [gemm=128 ratio 2/5, comp_share=0.35] compute=0.3325 memory=0.0500 network=0.6175 (sum=1.0000000000) ...
+      -> FAILED in 108s: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory budget (2441.41 um^2) for this GEMM at a 128x128 mesh -- raise wafer_area_budget_um2 or memory_area_fraction, or shrink the compute-derived mesh
+    [gemm=128 ratio 3/5, comp_share=0.50] compute=0.4750 memory=0.0500 network=0.4750 (sum=1.0000000000) ...
+      -> FAILED in 108s: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory budget (2441.41 um^2) for this GEMM at a 128x128 mesh -- raise wafer_area_budget_um2 or memory_area_fraction, or shrink the compute-derived mesh
+    [gemm=128 ratio 4/5, comp_share=0.65] compute=0.6175 memory=0.0500 network=0.3325 (sum=1.0000000000) ...
+      -> FAILED in 108s: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory budget (2441.41 um^2) for this GEMM at a 128x128 mesh -- raise wafer_area_budget_um2 or memory_area_fraction, or shrink the compute-derived mesh
+    [gemm=128 ratio 5/5, comp_share=0.80] compute=0.7600 memory=0.0500 network=0.1900 (sum=1.0000000000) ...
+      -> FAILED in 108s: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory budget (2441.41 um^2) for this GEMM at a 128x128 mesh -- raise wafer_area_budget_um2 or memory_area_fraction, or shrink the compute-derived mesh
+=== [gemm=128 step 2/10] memory=0.1500 (remainder=0.8500 split across up to 5 ratios) -- started 22:34:36 ===
+    [gemm=128 ratio 1/5, comp_share=0.20] compute=0.1700 memory=0.1500 network=0.6800 (sum=1.0000000000) ...
+      -> OK in 283s (mesh 128x128, 887 cycles, 176.91 uJ)
+=== [gemm=128 step 3/10] memory=0.2500 (remainder=0.7500 split across up to 5 ratios) -- started 22:39:19 ===
+    [gemm=128 ratio 1/5, comp_share=0.20] compute=0.1500 memory=0.2500 network=0.6000 (sum=1.0000000000) ...
+      -> OK in 283s (mesh 128x128, 887 cycles, 178.27 uJ)
+=== [gemm=128 step 4/10] memory=0.3500 (remainder=0.6500 split across up to 5 ratios) -- started 22:44:01 ===
+    [gemm=128 ratio 1/5, comp_share=0.20] compute=0.1300 memory=0.3500 network=0.5200 (sum=1.0000000000) ...
+      -> OK in 231s (mesh 64x128, 823 cycles, 142.17 uJ)
+=== [gemm=128 step 5/10] memory=0.4500 (remainder=0.5500 split across up to 5 ratios) -- started 22:47:52 ===
+    [gemm=128 ratio 1/5, comp_share=0.20] compute=0.1100 memory=0.4500 network=0.4400 (sum=1.0000000000) ...
+      -> OK in 231s (mesh 64x128, 823 cycles, 148.66 uJ)
+=== [gemm=128 step 6/10] memory=0.5500 (remainder=0.4500 split across up to 5 ratios) -- started 22:51:43 ===
+    [gemm=128 ratio 1/5, comp_share=0.20] compute=0.0900 memory=0.5500 network=0.3600 (sum=1.0000000000) ...
+      -> OK in 242s (mesh 64x128, 823 cycles, 151.25 uJ)
+=== [gemm=128 step 7/10] memory=0.6500 (remainder=0.3500 split across up to 5 ratios) -- started 22:55:45 ===
+    [gemm=128 ratio 1/5, comp_share=0.20] compute=0.0700 memory=0.6500 network=0.2800 (sum=1.0000000000) ...
+      -> OK in 239s (mesh 64x128, 823 cycles, 153.36 uJ)
+=== [gemm=128 step 8/10] memory=0.7500 (remainder=0.2500 split across up to 5 ratios) -- started 22:59:44 ===
+    [gemm=128 ratio 1/5, comp_share=0.20] compute=0.0500 memory=0.7500 network=0.2000 (sum=1.0000000000) ...
+      -> OK in 230s (mesh 64x64, 887 cycles, 124.47 uJ)
+=== [gemm=128 step 9/10] memory=0.8500 (remainder=0.1500 split across up to 5 ratios) -- started 23:03:34 ===
+    [gemm=128 ratio 1/5, comp_share=0.20] compute=0.0300 memory=0.8500 network=0.1200 (sum=1.0000000000) ...
+      -> OK in 233s (mesh 32x64, 1459 cycles, 124.73 uJ)
+=== [gemm=128 step 10/10] memory=0.9500 (remainder=0.0500 split across up to 5 ratios) -- started 23:07:28 ===
+    [gemm=128 ratio 1/5, comp_share=0.20] compute=0.0100 memory=0.9500 network=0.0400 (sum=1.0000000000) ...
+      -> OK in 240s (mesh 32x32, 2414 cycles, 127.62 uJ)
+
+=== [gemm=128] summary: memory 5%->95%, compute+network always summing to exactly (1 - memory), whichever of [0.2, 0.35, 0.5, 0.65, 0.8] compute-share ratios was first to work at each step (area budget 800000000 um^2) ===
+step    memory  compute  network comp_share      mesh  sram_kib fifo_pkts  sim_time_cycles  total_energy_uj
+1       0.0500   ALL 5 RATIOS FAILED -- last tried comp_share=0.80: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory
+2       0.1500   0.1700   0.6800       0.20   128x128        10         4              887         176.9098
+3       0.2500   0.1500   0.6000       0.20   128x128        11         4              887         178.2698
+4       0.3500   0.1300   0.5200       0.20    64x128        24         7              823         142.1662
+5       0.4500   0.1100   0.4400       0.20    64x128        23         5              823         148.6562
+6       0.5500   0.0900   0.3600       0.20    64x128        27         5              823         151.2462
+7       0.6500   0.0700   0.2800       0.20    64x128        26         3              823         153.3562
+8       0.7500   0.0500   0.2000       0.20     64x64        53         5              887         124.4660
+9       0.8500   0.0300   0.1200       0.20     32x64       109         6             1459         124.7346
+10      0.9500   0.0100   0.0400       0.20     32x32       236         4             2414         127.6212
+
+[gemm=128] done -- every real trial for this matrix size logged at /Users/huanliu/Documents/Codex/2026-05-12/wafer-scale-cerebras-simpy-map-hardware/outputs/experiment1_gemm_size/memory_sweep/gemm_128/trials.csv
+
+######################################################################
+# GEMM SIZE 256x256x256 -- memory-primary any-split sweep
+######################################################################
+=== [gemm=256 step 1/10] memory=0.0500 (remainder=0.9500 split across up to 5 ratios) -- started 23:11:28 ===
+    [gemm=256 ratio 1/5, comp_share=0.20] compute=0.1900 memory=0.0500 network=0.7600 (sum=1.0000000000) ...
+      -> FAILED in 106s: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory budget (2441.41 um^2) for this GEMM at a 128x128 mesh -- raise wafer_area_budget_um2 or memory_area_fraction, or shrink the compute-derived mesh
+    [gemm=256 ratio 2/5, comp_share=0.35] compute=0.3325 memory=0.0500 network=0.6175 (sum=1.0000000000) ...
+      -> FAILED in 208s: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory budget (1220.70 um^2) for this GEMM at a 128x256 mesh -- raise wafer_area_budget_um2 or memory_area_fraction, or shrink the compute-derived mesh
+    [gemm=256 ratio 3/5, comp_share=0.50] compute=0.4750 memory=0.0500 network=0.4750 (sum=1.0000000000) ...
+      -> FAILED in 207s: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory budget (1220.70 um^2) for this GEMM at a 128x256 mesh -- raise wafer_area_budget_um2 or memory_area_fraction, or shrink the compute-derived mesh
+    [gemm=256 ratio 4/5, comp_share=0.65] compute=0.6175 memory=0.0500 network=0.3325 (sum=1.0000000000) ...
+      -> FAILED in 1253s: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory budget (610.35 um^2) for this GEMM at a 256x256 mesh -- raise wafer_area_budget_um2 or memory_area_fraction, or shrink the compute-derived mesh
+    [gemm=256 ratio 5/5, comp_share=0.80] compute=0.7600 memory=0.0500 network=0.1900 (sum=1.0000000000) ...
+      -> FAILED in 2175s: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory budget (610.35 um^2) for this GEMM at a 256x256 mesh -- raise wafer_area_budget_um2 or memory_area_fraction, or shrink the compute-derived mesh
+=== [gemm=256 step 2/10] memory=0.1500 (remainder=0.8500 split across up to 5 ratios) -- started 00:17:18 ===
+    [gemm=256 ratio 1/5, comp_share=0.20] compute=0.1700 memory=0.1500 network=0.6800 (sum=1.0000000000) ...
+      -> OK in 311s (mesh 128x128, 1783 cycles, 775.53 uJ)
+=== [gemm=256 step 3/10] memory=0.2500 (remainder=0.7500 split across up to 5 ratios) -- started 00:22:29 ===
+    [gemm=256 ratio 1/5, comp_share=0.20] compute=0.1500 memory=0.2500 network=0.6000 (sum=1.0000000000) ...
+      -> OK in 1195s (mesh 128x128, 1783 cycles, 786.45 uJ)
+=== [gemm=256 step 4/10] memory=0.3500 (remainder=0.6500 split across up to 5 ratios) -- started 00:42:24 ===
+    [gemm=256 ratio 1/5, comp_share=0.20] compute=0.1300 memory=0.3500 network=0.5200 (sum=1.0000000000) ...
+      -> OK in 1203s (mesh 64x128, 2931 cycles, 719.24 uJ)
+=== [gemm=256 step 5/10] memory=0.4500 (remainder=0.5500 split across up to 5 ratios) -- started 01:02:26 ===
+    [gemm=256 ratio 1/5, comp_share=0.20] compute=0.1100 memory=0.4500 network=0.4400 (sum=1.0000000000) ...
+      -> OK in 276s (mesh 64x128, 2931 cycles, 767.42 uJ)
+=== [gemm=256 step 6/10] memory=0.5500 (remainder=0.4500 split across up to 5 ratios) -- started 01:07:03 ===
+    [gemm=256 ratio 1/5, comp_share=0.20] compute=0.0900 memory=0.5500 network=0.3600 (sum=1.0000000000) ...
+      -> OK in 293s (mesh 64x128, 2931 cycles, 786.58 uJ)
+=== [gemm=256 step 7/10] memory=0.6500 (remainder=0.3500 split across up to 5 ratios) -- started 01:11:56 ===
+    [gemm=256 ratio 1/5, comp_share=0.20] compute=0.0700 memory=0.6500 network=0.2800 (sum=1.0000000000) ...
+      -> OK in 295s (mesh 64x128, 2931 cycles, 802.11 uJ)
+=== [gemm=256 step 8/10] memory=0.7500 (remainder=0.2500 split across up to 5 ratios) -- started 01:16:51 ===
+    [gemm=256 ratio 1/5, comp_share=0.20] compute=0.0500 memory=0.7500 network=0.2000 (sum=1.0000000000) ...
+      -> OK in 283s (mesh 64x64, 4846 cycles, 726.11 uJ)
+=== [gemm=256 step 9/10] memory=0.8500 (remainder=0.1500 split across up to 5 ratios) -- started 01:21:34 ===
+    [gemm=256 ratio 1/5, comp_share=0.20] compute=0.0300 memory=0.8500 network=0.1200 (sum=1.0000000000) ...
+      -> OK in 303s (mesh 32x64, 9101 cycles, 788.57 uJ)
+=== [gemm=256 step 10/10] memory=0.9500 (remainder=0.0500 split across up to 5 ratios) -- started 01:26:37 ===
+    [gemm=256 ratio 1/5, comp_share=0.20] compute=0.0100 memory=0.9500 network=0.0400 (sum=1.0000000000) ...
+      -> OK in 330s (mesh 32x32, 16973 cycles, 872.93 uJ)
+
+=== [gemm=256] summary: memory 5%->95%, compute+network always summing to exactly (1 - memory), whichever of [0.2, 0.35, 0.5, 0.65, 0.8] compute-share ratios was first to work at each step (area budget 800000000 um^2) ===
+step    memory  compute  network comp_share      mesh  sram_kib fifo_pkts  sim_time_cycles  total_energy_uj
+1       0.0500   ALL 5 RATIOS FAILED -- last tried comp_share=0.80: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory
+2       0.1500   0.1700   0.6800       0.20   128x128        10         4             1783         775.5335
+3       0.2500   0.1500   0.6000       0.20   128x128        11         4             1783         786.4535
+4       0.3500   0.1300   0.5200       0.20    64x128        24         7             2931         719.2401
+5       0.4500   0.1100   0.4400       0.20    64x128        23         5             2931         767.4201
+6       0.5500   0.0900   0.3600       0.20    64x128        27         5             2931         786.5801
+7       0.6500   0.0700   0.2800       0.20    64x128        26         3             2931         802.1101
+8       0.7500   0.0500   0.2000       0.20     64x64        53         5             4846         726.1074
+9       0.8500   0.0300   0.1200       0.20     32x64       109         6             9101         788.5718
+10      0.9500   0.0100   0.0400       0.20     32x32       236         4            16973         872.9300
+
+[gemm=256] done -- every real trial for this matrix size logged at /Users/huanliu/Documents/Codex/2026-05-12/wafer-scale-cerebras-simpy-map-hardware/outputs/experiment1_gemm_size/memory_sweep/gemm_256/trials.csv
+
+######################################################################
+# GEMM SIZE 512x512x512 -- memory-primary any-split sweep
+######################################################################
+=== [gemm=512 step 1/10] memory=0.0500 (remainder=0.9500 split across up to 5 ratios) -- started 01:32:07 ===
+    [gemm=512 ratio 1/5, comp_share=0.20] compute=0.1900 memory=0.0500 network=0.7600 (sum=1.0000000000) ...
+      -> FAILED in 149s: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory budget (2441.41 um^2) for this GEMM at a 128x128 mesh -- raise wafer_area_budget_um2 or memory_area_fraction, or shrink the compute-derived mesh
+    [gemm=512 ratio 2/5, comp_share=0.35] compute=0.3325 memory=0.0500 network=0.6175 (sum=1.0000000000) ...
+      -> FAILED in 376s: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory budget (1220.70 um^2) for this GEMM at a 128x256 mesh -- raise wafer_area_budget_um2 or memory_area_fraction, or shrink the compute-derived mesh
+    [gemm=512 ratio 3/5, comp_share=0.50] compute=0.4750 memory=0.0500 network=0.4750 (sum=1.0000000000) ...
+      -> FAILED in 2254s: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory budget (1220.70 um^2) for this GEMM at a 128x256 mesh -- raise wafer_area_budget_um2 or memory_area_fraction, or shrink the compute-derived mesh
+    [gemm=512 ratio 4/5, comp_share=0.65] compute=0.6175 memory=0.0500 network=0.3325 (sum=1.0000000000) ...
+      -> FAILED in 7003s: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory budget (610.35 um^2) for this GEMM at a 256x256 mesh -- raise wafer_area_budget_um2 or memory_area_fraction, or shrink the compute-derived mesh
+    [gemm=512 ratio 5/5, comp_share=0.80] compute=0.7600 memory=0.0500 network=0.1900 (sum=1.0000000000) ...
+      -> FAILED in 2453s: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory budget (610.35 um^2) for this GEMM at a 256x256 mesh -- raise wafer_area_budget_um2 or memory_area_fraction, or shrink the compute-derived mesh
+=== [gemm=512 step 2/10] memory=0.1500 (remainder=0.8500 split across up to 5 ratios) -- started 04:56:02 ===
+    [gemm=512 ratio 1/5, comp_share=0.20] compute=0.1700 memory=0.1500 network=0.6800 (sum=1.0000000000) ...
+      -> OK in 450s (mesh 128x128, 9710 cycles, 4192.61 uJ)
+=== [gemm=512 step 3/10] memory=0.2500 (remainder=0.7500 split across up to 5 ratios) -- started 05:03:32 ===
+    [gemm=512 ratio 1/5, comp_share=0.20] compute=0.1500 memory=0.2500 network=0.6000 (sum=1.0000000000) ...
+      -> OK in 450s (mesh 128x128, 9710 cycles, 4280.18 uJ)
+=== [gemm=512 step 4/10] memory=0.3500 (remainder=0.6500 split across up to 5 ratios) -- started 05:11:02 ===
+    [gemm=512 ratio 1/5, comp_share=0.20] compute=0.1300 memory=0.3500 network=0.5200 (sum=1.0000000000) ...
+      -> OK in 328s (mesh 64x128, 18404 cycles, 4238.95 uJ)
+=== [gemm=512 step 5/10] memory=0.4500 (remainder=0.5500 split across up to 5 ratios) -- started 05:16:30 ===
+    [gemm=512 ratio 1/5, comp_share=0.20] compute=0.1100 memory=0.4500 network=0.4400 (sum=1.0000000000) ...
+      -> OK in 1377s (mesh 64x128, 18404 cycles, 4610.07 uJ)
+=== [gemm=512 step 6/10] memory=0.5500 (remainder=0.4500 split across up to 5 ratios) -- started 05:39:27 ===
+    [gemm=512 ratio 1/5, comp_share=0.20] compute=0.0900 memory=0.5500 network=0.3600 (sum=1.0000000000) ...
+      -> OK in 2587s (mesh 64x128, 18404 cycles, 4757.21 uJ)
+=== [gemm=512 step 7/10] memory=0.6500 (remainder=0.3500 split across up to 5 ratios) -- started 06:22:33 ===
+    [gemm=512 ratio 1/5, comp_share=0.20] compute=0.0700 memory=0.6500 network=0.2800 (sum=1.0000000000) ...
+      -> OK in 3020s (mesh 64x128, 18404 cycles, 4876.12 uJ)
+=== [gemm=512 step 8/10] memory=0.7500 (remainder=0.2500 split across up to 5 ratios) -- started 07:12:53 ===
+    [gemm=512 ratio 1/5, comp_share=0.20] compute=0.0500 memory=0.7500 network=0.2000 (sum=1.0000000000) ...
+      -> OK in 2652s (mesh 64x64, 33965 cycles, 4764.64 uJ)
+=== [gemm=512 step 9/10] memory=0.8500 (remainder=0.1500 split across up to 5 ratios) -- started 07:57:05 ===
+    [gemm=512 ratio 1/5, comp_share=0.20] compute=0.0300 memory=0.8500 network=0.1200 (sum=1.0000000000) ...
+      -> OK in 3640s (mesh 32x64, 67309 cycles, 5490.91 uJ)
+=== [gemm=512 step 10/10] memory=0.9500 (remainder=0.0500 split across up to 5 ratios) -- started 08:57:45 ===
+    [gemm=512 ratio 1/5, comp_share=0.20] compute=0.0100 memory=0.9500 network=0.0400 (sum=1.0000000000) ...
+      -> OK in 730s (mesh 32x32, 132525 cycles, 6403.69 uJ)
+
+=== [gemm=512] summary: memory 5%->95%, compute+network always summing to exactly (1 - memory), whichever of [0.2, 0.35, 0.5, 0.65, 0.8] compute-share ratios was first to work at each step (area budget 800000000 um^2) ===
+step    memory  compute  network comp_share      mesh  sram_kib fifo_pkts  sim_time_cycles  total_energy_uj
+1       0.0500   ALL 5 RATIOS FAILED -- last tried comp_share=0.80: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory
+2       0.1500   0.1700   0.6800       0.20   128x128        10         4             9710        4192.6101
+3       0.2500   0.1500   0.6000       0.20   128x128        11         4             9710        4280.1801
+4       0.3500   0.1300   0.5200       0.20    64x128        24         7            18404        4238.9454
+5       0.4500   0.1100   0.4400       0.20    64x128        23         5            18404        4610.0654
+6       0.5500   0.0900   0.3600       0.20    64x128        27         5            18404        4757.2054
+7       0.6500   0.0700   0.2800       0.20    64x128        26         3            18404        4876.1154
+8       0.7500   0.0500   0.2000       0.20     64x64        53         5            33965        4764.6371
+9       0.8500   0.0300   0.1200       0.20     32x64       109         6            67309        5490.9142
+10      0.9500   0.0100   0.0400       0.20     32x32       236         4           132525        6403.6885
+
+[gemm=512] done -- every real trial for this matrix size logged at /Users/huanliu/Documents/Codex/2026-05-12/wafer-scale-cerebras-simpy-map-hardware/outputs/experiment1_gemm_size/memory_sweep/gemm_512/trials.csv
+
+######################################################################
+# GEMM SIZE 2048x2048x2048 -- memory-primary any-split sweep
+######################################################################
+=== [gemm=2048 step 1/10] memory=0.0500 (remainder=0.9500 split across up to 5 ratios) -- started 09:09:55 ===
+    [gemm=2048 ratio 1/5, comp_share=0.20] compute=0.1900 memory=0.0500 network=0.7600 (sum=1.0000000000) ...
+      -> FAILED in 109s: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory budget (2441.41 um^2) for this GEMM at a 128x128 mesh -- raise wafer_area_budget_um2 or memory_area_fraction, or shrink the compute-derived mesh
+    [gemm=2048 ratio 2/5, comp_share=0.35] compute=0.3325 memory=0.0500 network=0.6175 (sum=1.0000000000) ...
+      -> FAILED in 1061s: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory budget (1220.70 um^2) for this GEMM at a 128x256 mesh -- raise wafer_area_budget_um2 or memory_area_fraction, or shrink the compute-derived mesh
+    [gemm=2048 ratio 3/5, comp_share=0.50] compute=0.4750 memory=0.0500 network=0.4750 (sum=1.0000000000) ...
+      -> FAILED in 4058s: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory budget (1220.70 um^2) for this GEMM at a 128x256 mesh -- raise wafer_area_budget_um2 or memory_area_fraction, or shrink the compute-derived mesh
+    [gemm=2048 ratio 4/5, comp_share=0.65] compute=0.6175 memory=0.0500 network=0.3325 (sum=1.0000000000) ...
+      -> FAILED in 12685s: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory budget (610.35 um^2) for this GEMM at a 256x256 mesh -- raise wafer_area_budget_um2 or memory_area_fraction, or shrink the compute-derived mesh
+    [gemm=2048 ratio 5/5, comp_share=0.80] compute=0.7600 memory=0.0500 network=0.1900 (sum=1.0000000000) ...
+      -> FAILED in 4538s: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory budget (610.35 um^2) for this GEMM at a 256x256 mesh -- raise wafer_area_budget_um2 or memory_area_fraction, or shrink the compute-derived mesh
+=== [gemm=2048 step 2/10] memory=0.1500 (remainder=0.8500 split across up to 5 ratios) -- started 15:24:07 ===
+    [gemm=2048 ratio 1/5, comp_share=0.20] compute=0.1700 memory=0.1500 network=0.6800 (sum=1.0000000000) ...
+      -> OK in 3165s (mesh 128x128, 544458 cycles, 176407.69 uJ)
+=== [gemm=2048 step 3/10] memory=0.2500 (remainder=0.7500 split across up to 5 ratios) -- started 16:16:52 ===
+    [gemm=2048 ratio 1/5, comp_share=0.20] compute=0.1500 memory=0.2500 network=0.6000 (sum=1.0000000000) ...
+      -> OK in 6020s (mesh 128x128, 536682 cycles, 181767.59 uJ)
+=== [gemm=2048 step 4/10] memory=0.3500 (remainder=0.6500 split across up to 5 ratios) -- started 17:57:12 ===
+    [gemm=2048 ratio 1/5, comp_share=0.20] compute=0.1300 memory=0.3500 network=0.5200 (sum=1.0000000000) ...
+      -> OK in 1664s (mesh 64x128, 1059592 cycles, 200602.73 uJ)
+=== [gemm=2048 step 5/10] memory=0.4500 (remainder=0.5500 split across up to 5 ratios) -- started 18:24:55 ===
+    [gemm=2048 ratio 1/5, comp_share=0.20] compute=0.1100 memory=0.4500 network=0.4400 (sum=1.0000000000) ...
+      -> OK in 442s (mesh 64x128, 1059592 cycles, 223667.42 uJ)
+=== [gemm=2048 step 6/10] memory=0.5500 (remainder=0.4500 split across up to 5 ratios) -- started 18:32:17 ===
+    [gemm=2048 ratio 1/5, comp_share=0.20] compute=0.0900 memory=0.5500 network=0.3600 (sum=1.0000000000) ...
+      -> OK in 476s (mesh 64x128, 1059250 cycles, 232783.99 uJ)
+=== [gemm=2048 step 7/10] memory=0.6500 (remainder=0.3500 split across up to 5 ratios) -- started 18:40:13 ===
+    [gemm=2048 ratio 1/5, comp_share=0.20] compute=0.0700 memory=0.6500 network=0.2800 (sum=1.0000000000) ...
+      -> OK in 497s (mesh 64x128, 1059250 cycles, 240138.38 uJ)
+=== [gemm=2048 step 8/10] memory=0.7500 (remainder=0.2500 split across up to 5 ratios) -- started 18:48:30 ===
+    [gemm=2048 ratio 1/5, comp_share=0.20] compute=0.0500 memory=0.7500 network=0.2000 (sum=1.0000000000) ...
+      -> OK in 435s (mesh 64x64, 2107330 cycles, 256158.52 uJ)
+=== [gemm=2048 step 9/10] memory=0.8500 (remainder=0.1500 split across up to 5 ratios) -- started 18:55:44 ===
+    [gemm=2048 ratio 1/5, comp_share=0.20] compute=0.0300 memory=0.8500 network=0.1200 (sum=1.0000000000) ...
+      -> OK in 381s (mesh 32x64, 4213112 cycles, 312864.27 uJ)
+=== [gemm=2048 step 10/10] memory=0.9500 (remainder=0.0500 split across up to 5 ratios) -- started 19:02:05 ===
+    [gemm=2048 ratio 1/5, comp_share=0.20] compute=0.0100 memory=0.9500 network=0.0400 (sum=1.0000000000) ...
+      -> OK in 358s (mesh 32x32, 8407506 cycles, 382174.67 uJ)
+
+=== [gemm=2048] summary: memory 5%->95%, compute+network always summing to exactly (1 - memory), whichever of [0.2, 0.35, 0.5, 0.65, 0.8] compute-share ratios was first to work at each step (area budget 800000000 um^2) ===
+step    memory  compute  network comp_share      mesh  sram_kib fifo_pkts  sim_time_cycles  total_energy_uj
+1       0.0500   ALL 5 RATIOS FAILED -- last tried comp_share=0.80: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory
+2       0.1500   0.1700   0.6800       0.20   128x128        10         4           544458      176407.6946
+3       0.2500   0.1500   0.6000       0.20   128x128        11         4           536682      181767.5907
+4       0.3500   0.1300   0.5200       0.20    64x128        24         7          1059592      200602.7342
+5       0.4500   0.1100   0.4400       0.20    64x128        23         5          1059592      223667.4242
+6       0.5500   0.0900   0.3600       0.20    64x128        27         5          1059250      232783.9909
+7       0.6500   0.0700   0.2800       0.20    64x128        26         3          1059250      240138.3809
+8       0.7500   0.0500   0.2000       0.20     64x64        53         5          2107330      256158.5202
+9       0.8500   0.0300   0.1200       0.20     32x64       109         6          4213112      312864.2716
+10      0.9500   0.0100   0.0400       0.20     32x32       236         4          8407506      382174.6691
+
+[gemm=2048] done -- every real trial for this matrix size logged at /Users/huanliu/Documents/Codex/2026-05-12/wafer-scale-cerebras-simpy-map-hardware/outputs/experiment1_gemm_size/memory_sweep/gemm_2048/trials.csv
+
+######################################################################
+# GEMM SIZE 4096x4096x4096 -- memory-primary any-split sweep
+######################################################################
+=== [gemm=4096 step 1/10] memory=0.0500 (remainder=0.9500 split across up to 5 ratios) -- started 19:08:03 ===
+    [gemm=4096 ratio 1/5, comp_share=0.20] compute=0.1900 memory=0.0500 network=0.7600 (sum=1.0000000000) ...
+      -> FAILED in 109s: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory budget (2441.41 um^2) for this GEMM at a 128x128 mesh -- raise wafer_area_budget_um2 or memory_area_fraction, or shrink the compute-derived mesh
+    [gemm=4096 ratio 2/5, comp_share=0.35] compute=0.3325 memory=0.0500 network=0.6175 (sum=1.0000000000) ...
+      -> FAILED in 248s: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory budget (1220.70 um^2) for this GEMM at a 128x256 mesh -- raise wafer_area_budget_um2 or memory_area_fraction, or shrink the compute-derived mesh
+    [gemm=4096 ratio 3/5, comp_share=0.50] compute=0.4750 memory=0.0500 network=0.4750 (sum=1.0000000000) ...
+      -> FAILED in 266s: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory budget (1220.70 um^2) for this GEMM at a 128x256 mesh -- raise wafer_area_budget_um2 or memory_area_fraction, or shrink the compute-derived mesh
+    [gemm=4096 ratio 4/5, comp_share=0.65] compute=0.6175 memory=0.0500 network=0.3325 (sum=1.0000000000) ...
+      -> FAILED in 3164s: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory budget (610.35 um^2) for this GEMM at a 256x256 mesh -- raise wafer_area_budget_um2 or memory_area_fraction, or shrink the compute-derived mesh
+    [gemm=4096 ratio 5/5, comp_share=0.80] compute=0.7600 memory=0.0500 network=0.1900 (sum=1.0000000000) ...
+      -> FAILED in 2347s: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory budget (610.35 um^2) for this GEMM at a 256x256 mesh -- raise wafer_area_budget_um2 or memory_area_fraction, or shrink the compute-derived mesh
+=== [gemm=4096 step 2/10] memory=0.1500 (remainder=0.8500 split across up to 5 ratios) -- started 20:50:17 ===
+    [gemm=4096 ratio 1/5, comp_share=0.20] compute=0.1700 memory=0.1500 network=0.6800 (sum=1.0000000000) ...
+      -> FAILED in 107s: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory budget (7324.22 um^2) for this GEMM at a 128x128 mesh -- raise wafer_area_budget_um2 or memory_area_fraction, or shrink the compute-derived mesh
+    [gemm=4096 ratio 2/5, comp_share=0.35] compute=0.2975 memory=0.1500 network=0.5525 (sum=1.0000000000) ...
+      -> FAILED in 768s: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory budget (3662.11 um^2) for this GEMM at a 128x256 mesh -- raise wafer_area_budget_um2 or memory_area_fraction, or shrink the compute-derived mesh
+    [gemm=4096 ratio 3/5, comp_share=0.50] compute=0.4250 memory=0.1500 network=0.4250 (sum=1.0000000000) ...
+      -> FAILED in 253s: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory budget (3662.11 um^2) for this GEMM at a 128x256 mesh -- raise wafer_area_budget_um2 or memory_area_fraction, or shrink the compute-derived mesh
+    [gemm=4096 ratio 4/5, comp_share=0.65] compute=0.5525 memory=0.1500 network=0.2975 (sum=1.0000000000) ...
+      -> FAILED in 3148s: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory budget (1831.05 um^2) for this GEMM at a 256x256 mesh -- raise wafer_area_budget_um2 or memory_area_fraction, or shrink the compute-derived mesh
+    [gemm=4096 ratio 5/5, comp_share=0.80] compute=0.6800 memory=0.1500 network=0.1700 (sum=1.0000000000) ...
+      -> FAILED in 11380s: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory budget (1831.05 um^2) for this GEMM at a 256x256 mesh -- raise wafer_area_budget_um2 or memory_area_fraction, or shrink the compute-derived mesh
+=== [gemm=4096 step 3/10] memory=0.2500 (remainder=0.7500 split across up to 5 ratios) -- started 01:11:13 ===
+    [gemm=4096 ratio 1/5, comp_share=0.20] compute=0.1500 memory=0.2500 network=0.6000 (sum=1.0000000000) ...
+      -> FAILED in 782s: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory budget (12207.03 um^2) for this GEMM at a 128x128 mesh -- raise wafer_area_budget_um2 or memory_area_fraction, or shrink the compute-derived mesh
+    [gemm=4096 ratio 2/5, comp_share=0.35] compute=0.2625 memory=0.2500 network=0.4875 (sum=1.0000000000) ...
+      -> FAILED in 108s: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory budget (12207.03 um^2) for this GEMM at a 128x128 mesh -- raise wafer_area_budget_um2 or memory_area_fraction, or shrink the compute-derived mesh
+    [gemm=4096 ratio 3/5, comp_share=0.50] compute=0.3750 memory=0.2500 network=0.3750 (sum=1.0000000000) ...
+      -> FAILED in 251s: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory budget (6103.52 um^2) for this GEMM at a 128x256 mesh -- raise wafer_area_budget_um2 or memory_area_fraction, or shrink the compute-derived mesh
+    [gemm=4096 ratio 4/5, comp_share=0.65] compute=0.4875 memory=0.2500 network=0.2625 (sum=1.0000000000) ...
+      -> FAILED in 256s: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory budget (6103.52 um^2) for this GEMM at a 128x256 mesh -- raise wafer_area_budget_um2 or memory_area_fraction, or shrink the compute-derived mesh
+    [gemm=4096 ratio 5/5, comp_share=0.80] compute=0.6000 memory=0.2500 network=0.1500 (sum=1.0000000000) ...
+      -> FAILED in 5124s: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory budget (3051.76 um^2) for this GEMM at a 256x256 mesh -- raise wafer_area_budget_um2 or memory_area_fraction, or shrink the compute-derived mesh
+
+=== [gemm=4096] STOPPING EARLY after 3 consecutive memory steps where EVERY ratio failed (memory=0.2500) -- 7 step(s) NOT run for this matrix size: ['0.3500', '0.4500', '0.5500', '0.6500', '0.7500', '0.8500', '0.9500']. ===
+
+
+=== [gemm=4096] summary: memory 5%->95%, compute+network always summing to exactly (1 - memory), whichever of [0.2, 0.35, 0.5, 0.65, 0.8] compute-share ratios was first to work at each step (area budget 800000000 um^2) ===
+step    memory  compute  network comp_share      mesh  sram_kib fifo_pkts  sim_time_cycles  total_energy_uj
+1       0.0500   ALL 5 RATIOS FAILED -- last tried comp_share=0.80: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory
+2       0.1500   ALL 5 RATIOS FAILED -- last tried comp_share=0.80: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory
+3       0.2500   ALL 5 RATIOS FAILED -- last tried comp_share=0.80: ValueError: no sram_kib_per_pe in [1, 4096] KiB fits the per-PE memory
+
+[gemm=4096] 7 step(s) skipped by early-stop: ['0.3500', '0.4500', '0.5500', '0.6500', '0.7500', '0.8500', '0.9500']
+
+[gemm=4096] done -- every real trial for this matrix size logged at /Users/huanliu/Documents/Codex/2026-05-12/wafer-scale-cerebras-simpy-map-hardware/outputs/experiment1_gemm_size/memory_sweep/gemm_4096/trials.csv
+
+======================================================================
+ALL 5 MATRIX SIZES DONE (memory-primary branch). Combined real results (every trial, every size) at /Users/huanliu/Documents/Codex/2026-05-12/wafer-scale-cerebras-simpy-map-hardware/outputs/experiment1_gemm_size/memory_sweep/all_trials.csv
+======================================================================

@@ -15,11 +15,11 @@ citation basis).
 Only the wire LINK between two adjacent PEs' routers has no such path: it
 is not owned by a single PE's architecture subtree, so there is nothing for
 Accelergy to estimate per-PE. It remains OpenCake's own analytical
-coefficient, wafer.link_area_um2_per_pe -- defaults to 0.0 (see specs.py)
-because no sufficiently precise real per-PE-attributable wire-area citation
-was found; a total computed with that default left at 0.0 is PE-internal
-area only (mac + pe_scratchpad + fifo_buffer + router_buffer), still 100%
-real.
+coefficient, wafer.link_area_um2_per_pe -- no Accelergy plugin computes it,
+so it is a reasoned estimate assembled from real, cited inputs (ITRS wire
+pitch + the ORION 2.0 link-area formula + a real Cerebras-cited PE tile
+area used as the hop length), not a directly-published single number; see
+specs.py's link_area_um2_per_pe comment for the full derivation.
 
 Two PE counts are reported side by side, not one blended number:
   - active_pes: PEs actually participating in THIS GEMM run (contract.
@@ -82,8 +82,9 @@ def estimate_area(
     Passing anything else (e.g. a placeholder 0.0, as this project's unit
     tests do for a synthetic contract) is valid but will simply report zero
     PE-internal area. ``interconnect_area_um2_per_pe`` below is now ONLY the
-    inter-PE link/wire term -- FIFO/router area is already folded into
-    ``pe_internal_area_um2`` (see this module's docstring).
+    inter-PE link/wire term (``wafer.link_area_um2_per_pe`` -- a reasoned
+    estimate, not 0.0 by default; see this module's docstring) -- FIFO/
+    router area is already folded into ``pe_internal_area_um2``.
     """
     interconnect_area_um2_per_pe = wafer.link_area_um2_per_pe
     return AreaBreakdown(

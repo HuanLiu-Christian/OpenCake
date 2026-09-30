@@ -1,0 +1,58 @@
+==============================================================================
+STEP 1: NUMERIC-ONLY forward pass (real numpy via Tensor, no Docker)
+==============================================================================
+config: Qwen3Config8B(vocab_size=151936, hidden_size=4096, intermediate_size=12288, num_hidden_layers=36, num_attention_heads=32, num_key_value_heads=8, head_dim=128, rms_norm_eps=1e-06, rope_theta=1000000.0)
+prefill_seq_len=10, decode_steps=6
+NOTE: layer weights are ONE real shared set reused across all 36 layers, and embed_tokens/lm_head use a 1024-row numeric-only stand-in table (NOT the real vocab_size=151936) -- see module docstring part (a)/(b) for why this does not change the real hardware-cost numbers in STEP 2.
+[prefill] output shape: (10, 4096), logits shape: (1, 1024), next_token=513
+[decode step 1/6] position=10 cache_len=11 next_token=617
+[decode step 2/6] position=11 cache_len=12 next_token=209
+[decode step 3/6] position=12 cache_len=13 next_token=399
+[decode step 4/6] position=13 cache_len=14 next_token=980
+[decode step 5/6] position=14 cache_len=15 next_token=206
+[decode step 6/6] position=15 cache_len=16 next_token=1002
+all finite (no NaN/Inf) across prefill+decode: True
+wall time: 1.952s
+
+==============================================================================
+STEP 2: HARDWARE-COST pass (real Docker/TimeLoop, memoized per unique op shape)
+==============================================================================
+deriving WaferSpec from area budget 800,000,000 um^2 (real Docker binary search, representative GEMM m=10 n=12288 k=4096) ...
+derived wafer: mesh 10x1536, sram_kib_per_pe=12, fifo_capacity_packets=5
+real area used: compute=101,806,080.00 um^2, memory=6,189.40 um^2, network=34,071.20 um^2
+[decode step 1/6, costed] cache_len=11
+[decode step 2/6, costed] cache_len=12
+[decode step 3/6, costed] cache_len=13
+[decode step 4/6, costed] cache_len=14
+[decode step 5/6, costed] cache_len=15
+[decode step 6/6, costed] cache_len=16
+
+real Docker/TimeLoop primitive calls actually executed: 126
+real results memoized/reused (identical shape, same real Docker result): 103344
+total real sequential-trace compute cycles: 388,962,792.0
+total real energy (sum across every real op instance): 7945775.3464 uJ
+real chip area actually used: 101,846,340.60 um^2
+wall time for the hardware-cost pass: 6233.1s
+
+op          instances     total_cycles    total_energy_uj
+add              2023        7,691,920          1875.7975
+concat           1188       11,280,384          1623.4200
+cos                 7           49,152            11.5025
+div              8064        2,502,144           567.3600
+exp              8064        3,961,728           852.4800
+gather              7           65,536             9.6175
+gemm            17899     56,067,944.0       7840599.7839
+max             18432          190,080            46.0800
+mul             13384       36,408,592          9724.7425
+repeat            504       26,836,992          4186.4400
+reshape         24193                0             0.0000
+rsqrt            1015          363,120            79.8950
+silu              252      233,570,304         84010.9500
+sin                 7           47,104            11.0575
+sub              8568        1,683,072           384.6600
+sum             42640        7,899,120          1745.4800
+where            1152          345,600            46.0800
+
+Hardware-cost pass complete -- every number above came from a real
+timeloop-mapper/timeloop-model/Accelergy Docker run; see /Users/huanliu/Documents/Codex/2026-05-12/wafer-scale-cerebras-simpy-map-hardware/outputs/qwen3_8b_prefill_decode for the real
+artifact tree (resolved.stats.txt / resolved.ART.yaml per unique op shape).
