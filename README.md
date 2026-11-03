@@ -90,5 +90,75 @@ than a bare `opencake-wafer` command.
 ## Test
 
 ```bash
-PYTHONPATH=src python3 -m unittest discover -s tests
+PYTHONPATH=src python3 -m pytest tests -q
 ```
+
+The suite does not need Docker (359 tests).
+
+## LLM decode-throughput experiments (Llama / Qwen slices)
+
+These experiments ask whether the simulator can reproduce the single-user
+decode speed Cerebras reports for CS-3 (about 2,400-2,500 tok/s on
+Llama 3.3 70B / Qwen3-32B, Artificial Analysis "Output Speed", i.e. tokens
+per second after the first token). Because one wafer has ~900,000 PEs, each
+model is shrunk to **1/100 PE scale** (9,000 PEs, mesh 90x100, 48 KiB SRAM
+per PE, 1 GHz, batch 1, fp16) and cut into the same layer slice that one
+CS-3 would hold under pipeline parallelism, with weights and KV cache both
+kept in on-chip SRAM. Input / output length is 1024 / 1024.
+
+| Experiment folder | Model slice | What it represents |
+| --- | --- | --- |
+| `experiment_llama33_slice` | Llama-3.3-70B, 20 layers, d=704 | one of 4 CS-3 machines (80 layers / 4) |
+| `experiment_qwen3_slice` | Qwen3-32B, 32 layers, d=460 | one of 2 machines (64 layers / 2) |
+| `experiment_qwen3_slice4w` | Qwen3-32B, 16 layers, d=480 | one of 4 machines (64 layers / 4) |
+| `experiment_qwen3_slice_region` | Qwen3-32B slice | weight-stationary K-split region mapping, analytic + `PacketNetwork` (no Docker) |
+
+Shared code lives in `experiment_dense_llm_throughput/dense_llm_throughput.py`
+(which also loads `experiment_gptoss_moe_mlp` and
+`experiment_gptoss_attention_kvcache`, so keep those folders). Run from the
+repo root inside an activated Python environment with Docker running:
+
+```bash
+python3 experiment_llama33_slice/llama33_slice.py --batches 1 --modes optimistic \
+  --skip-numeric --mac-lanes 8 --sram-read-bytes 16 --tag lanes8
+python3 experiment_qwen3_slice/qwen3_slice.py --batches 1 --modes optimistic \
+  --skip-numeric --mac-lanes 8 --sram-read-bytes 16 --tag lanes8
+python3 experiment_qwen3_slice4w/qwen3_slice4w.py --batches 1 --modes optimistic \
+  --skip-numeric --mac-lanes 8 --sram-read-bytes 16 --tag lanes8
+python3 experiment_qwen3_slice_region/region_decode.py --region 14x18 --lanes 8
+```
+
+`--mac-lanes 8` models the 8-way FP16 SIMD datapath of a WSE-3 core and
+`--sram-read-bytes 16` its 128-bit SRAM read. Each real run takes hours
+because every GEMM shape goes through `timeloop-model`. Results are written
+to `outputs/dense_llm_throughput/<tag>/summary.json` (git-ignored); the
+four result files used in our analysis are copied into
+`results/dense_llm_throughput/`.
+
+### Results (one slice, batch 1, 1024 in / 1024 out)
+
+| Result file | mac lanes | TTFT | ITL | Decode tok/s | Weights / total SRAM |
+| --- | --- | --- | --- | --- | --- |
+| `llama33_slice_d704_lanes1` | 1 | 30.1 ms | 1.793 ms | 557.7 | 61% |
+| `llama33_slice_d704_lanes8` | 8 | 5.31 ms | 0.410 ms | 2,438.7 | 61% |
+| `qwen3_slice_d460_lanes8` | 8 | 6.40 ms | 0.521 ms | 1,917.7 | 62% |
+| `qwen3_slice4w_d480_lanes8` | 8 | 3.31 ms | 0.304 ms | 3,292.5 | 37% |
+
+Decode throughput = batch / ITL; ITL is averaged over cache lengths 1024,
+1535 and 2046 with Simpson weights. These are **slice** numbers: a slice
+only holds a fraction of the layers, so its tok/s is not comparable with a
+full-model figure. A rough full-model equivalent is
+`n_wafers x slice ITL + (n_wafers - 1) x ~5 us` inter-machine hop (Cerebras
+Hot Chips 2024: hop under 5 us), which gives about 604 tok/s for Llama
+(4 machines), 954 for Qwen3 (2 machines) and 813 for Qwen3 (4 machines).
+The 5 us hop and the number of machines used by Cerebras are estimates, not
+published figures.
+
+### Known limitations
+
+- Per-PE link width defaults to 32 B/cycle; the official WSE-2 fabric is
+  4 B/cycle per direction, so communication-heavy results are optimistic.
+- Decode attention uses a divisor-based mapping and only three cache-length
+  sample points, which biases decode latency slightly low.
+- Weights are assumed already resident at the active PEs.
+- Batch greater than 1 raises aggregate throughput but not per-user ITL.

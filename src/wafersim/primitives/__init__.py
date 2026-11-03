@@ -115,12 +115,24 @@ Status per primitive:
     full derivation. Used for RoPE's rotary embedding tables, previously
     precomputed via plain, uncosted numpy in this project's Qwen3
     composition scripts.
+  - clamp/topk: REAL, added for gpt-oss (SwiGLU clamp, MoE router topk).
+    Numeric compute is real numpy on Tensor (``clamp`` matches
+    ``torch.clamp``; ``topk`` returns descending ``(values, int64
+    indices)``). Cost-model layer: ClampSpec/simulate_clamp (one real
+    ``comparator`` firing + one exact 3-gate ``bitwise`` mux per element per
+    bound) and TopKSpec/simulate_topk (k rounds of max-with-index plus
+    winner masking, from the same two real components) -- see each folder's
+    own package/``_timeloop_*`` docstring. Their Docker cost layer composes
+    the already-Docker-verified comparator/bitwise pipelines but has NOT
+    itself been run end to end yet; run ``run_clamp_single_check.py`` and
+    ``run_topk_single_check.py`` with Docker open to confirm.
 """
 
 from __future__ import annotations
 
 from .add import add
 from .cast import CastResult, CastSpec, cast, simulate_cast
+from .clamp import ClampResult, ClampSpec, clamp, simulate_clamp
 from .concat_stack import ConcatStackSpec, concat, simulate_concat_stack, stack
 from .cos import CosResult, CosSpec, cos, simulate_cos
 from .div import div
@@ -150,6 +162,7 @@ from .slice_gather import GatherSpec, gather, simulate_gather, slice_
 from .sub import SubResult, SubSpec, simulate_sub, sub
 from .sum import sum
 from .tensor import Tensor
+from .topk import TopKResult, TopKSpec, simulate_topk, topk
 from .transpose_permute import permute, transpose
 from .where_select import WhereResult, WhereSpec, simulate_where, where
 
@@ -179,6 +192,8 @@ __all__ = [
     "sub",
     "sin",
     "cos",
+    "clamp",
+    "topk",
     # matmul's own real, Docker-backed GEMM cost-model pipeline (see
     # matmul/__init__.py) -- independent of the numeric `matmul` above.
     "GemmSpec",
@@ -230,4 +245,13 @@ __all__ = [
     "CosSpec",
     "CosResult",
     "simulate_cos",
+    # New real, Docker-backed clamp/topk cost-model pipelines added for
+    # gpt-oss (MoE router topk, SwiGLU clamp) -- see each folder's own
+    # package docstring.
+    "ClampSpec",
+    "ClampResult",
+    "simulate_clamp",
+    "TopKSpec",
+    "TopKResult",
+    "simulate_topk",
 ]

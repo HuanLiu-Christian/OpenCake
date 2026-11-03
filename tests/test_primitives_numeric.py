@@ -17,6 +17,7 @@ import pytest
 
 from wafersim.primitives.add import add
 from wafersim.primitives.cast import cast
+from wafersim.primitives.clamp import ClampSpec, clamp
 from wafersim.primitives.concat_stack import concat, stack
 from wafersim.primitives.div import div
 from wafersim.primitives.exp import exp
@@ -30,6 +31,7 @@ from wafersim.primitives.silu import silu
 from wafersim.primitives.slice_gather import gather, slice_
 from wafersim.primitives.sum import sum as t_sum
 from wafersim.primitives.tensor import Tensor
+from wafersim.primitives.topk import TopKSpec, topk
 from wafersim.primitives.transpose_permute import permute, transpose
 from wafersim.primitives.where_select import where
 
@@ -288,3 +290,100 @@ def test_rmsnorm_composed_from_primitives_matches_reference():
 
     assert result.shape == x.shape
     assert np.allclose(result.data, expected, atol=1e-4, rtol=1e-4)
+
+
+# ---- clamp / topk (added for gpt-oss: SwiGLU clamp, MoE router topk) --
+
+def test_clamp_two_sided_matches_numpy_and_keeps_dtype():
+    x = Tensor.from_values([[-9.0, -7.0, 0.5], [7.0, 8.5, -0.25]])
+    out = clamp(x, min=-7.0, max=7.0)
+    np.testing.assert_array_equal(out.data, np.clip(x.data, -7.0, 7.0))
+    assert out.dtype == x.dtype and out.shape == x.shape
+
+
+def test_clamp_one_sided_upper_and_lower():
+    x = Tensor.from_values([-20.0, 0.0, 7.5, 100.0])
+    np.testing.assert_array_equal(clamp(x, max=7.0).data, np.minimum(x.data, 7.0))
+    np.testing.assert_array_equal(clamp(x, min=-7.0).data, np.maximum(x.data, -7.0))
+
+
+def test_clamp_requires_a_bound_and_propagates_nan():
+    x = Tensor.from_values([1.0, float("nan")])
+    with pytest.raises(ValueError):
+        clamp(x)
+    assert np.isnan(clamp(x, max=0.5).data[1])
+
+
+def test_clamp_min_greater_than_max_gives_max_like_torch():
+    x = Tensor.from_values([-1.0, 0.0, 5.0])
+    np.testing.assert_array_equal(clamp(x, min=3.0, max=2.0).data, [2.0, 2.0, 2.0])
+
+
+def test_clamp_spec_counts_are_exact():
+    one = ClampSpec(elements_per_pe=10, num_bounds=1)
+    two = ClampSpec(elements_per_pe=10, num_bounds=2)
+    assert (one.real_compare_count, one.real_bitwise_count) == (10, 30)
+    assert (two.real_compare_count, two.real_bitwise_count) == (20, 60)
+    with pytest.raises(ValueError):
+        ClampSpec(elements_per_pe=10, num_bounds=3).validate()
+
+
+def test_topk_matches_numpy_reference_on_distinct_scores():
+    rng = np.random.default_rng(0)
+    scores = Tensor(rng.permutation(5 * 128).astype(np.float32).reshape(5, 128))
+    vals, idx = topk(scores, k=4)
+    assert vals.shape == (5, 4) and idx.shape == (5, 4)
+    assert idx.dtype == np.int64
+    ref_idx = np.argsort(-scores.data, axis=-1)[:, :4]
+    np.testing.assert_array_equal(idx.data, ref_idx)
+    np.testing.assert_array_equal(vals.data, np.take_along_axis(scores.data, ref_idx, -1))
+    assert np.all(np.diff(vals.data, axis=-1) < 0)  # sorted descending
+
+
+def test_topk_ties_break_toward_lower_index_and_dim_argument():
+    x = Tensor.from_values([[1.0, 3.0, 3.0, 2.0]])
+    vals, idx = topk(x, k=2)
+    assert vals.data.tolist() == [[3.0, 3.0]] and idx.data.tolist() == [[1, 2]]
+    vals0, idx0 = topk(Tensor.from_values([[1.0], [5.0], [3.0]]), k=2, dim=0)
+    assert vals0.data.tolist() == [[5.0], [3.0]] and idx0.data.tolist() == [[1], [2]]
+
+
+def test_topk_rejects_bad_k():
+    x = Tensor.from_values([[1.0, 2.0, 3.0]])
+    for bad in (0, 4):
+        with pytest.raises(ValueError):
+            topk(x, k=bad)
+
+
+def test_topk_spec_counts_for_gpt_oss_router():
+    spec = TopKSpec(rows_per_pe=1, num_elements=128, k=4)
+    # k*(E-1) + (k-1)*E = 4*127 + 3*128 = 892 comparator firings per row
+    assert spec.real_compare_count == 892
+    assert spec.real_bitwise_count == 3 * 892
+    assert TopKSpec(rows_per_pe=10, num_elements=128, k=4).real_compare_count == 8920
+    with pytest.raises(ValueError):
+        TopKSpec(rows_per_pe=1, num_elements=4, k=5).validate()
+    assert TopKSpec(rows_per_pe=3, num_elements=1, k=1).real_compare_count == 0
+
+
+def test_gpt_oss_swiglu_composed_from_primitives_matches_reference():
+    """gpt-oss's swiglu (alpha=1.702, limit=7.0, interleaved split, extra
+    +1 on the linear branch) built from clamp + existing primitives, using
+    x*sigmoid(a*x) == silu(a*x)/a, vs. a plain numpy transcription."""
+    rng = np.random.default_rng(1)
+    x = Tensor((rng.standard_normal((6, 32)) * 6).astype(np.float32))
+    alpha, limit = 1.702, 7.0
+
+    def ref(a):
+        glu, lin = a[..., ::2], a[..., 1::2]
+        glu = np.minimum(glu, limit)
+        lin = np.clip(lin, -limit, limit)
+        return glu * (1.0 / (1.0 + np.exp(-alpha * glu))) * (lin + 1.0)
+
+    glu = clamp(Tensor(x.data[..., ::2]), max=limit)
+    lin = clamp(Tensor(x.data[..., 1::2]), min=-limit, max=limit)
+    scale = Tensor.from_values(np.full(glu.shape, alpha, dtype=np.float32))
+    out_glu = div(silu(mul(glu, scale)), scale)
+    one = Tensor.from_values(np.ones(lin.shape, dtype=np.float32))
+    out = mul(out_glu, add(lin, one))
+    np.testing.assert_allclose(out.data, ref(x.data), rtol=1e-4, atol=1e-5)

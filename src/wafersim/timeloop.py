@@ -956,6 +956,16 @@ def _parse_summary_stats(stats_text: str, log_path: Path) -> tuple[int, float]:
     Raises with the actual block contents on failure instead of defaulting
     to 0 -- if TimeLoop's real output doesn't match this pattern, that
     needs to be visible and fixed, not silently swallowed.
+
+    Energy precision: the headline ``Energy: X uJ`` line is printed with
+    only 2 decimals, i.e. a 0.01 uJ quantization floor that dominates tiny
+    runs (a few-element-per-PE slice costs ~0.001-0.01 uJ and used to read
+    back as 0.01). The same block also prints ``Computes = N`` and a
+    ``fJ/Compute`` table whose ``Total`` is energy per compute to 0.01 fJ,
+    so ``Computes x Total`` is the same quantity at ~1e-7 relative
+    precision. That is used when present; the headline line is then only
+    a cross-check (they must agree to within the headline's own rounding),
+    and is the fallback when the table is absent.
     """
     summary_match = re.search(r"Summary\s+Stats\b[\s\S]*", stats_text)
     if not summary_match:
@@ -976,9 +986,63 @@ def _parse_summary_stats(stats_text: str, log_path: Path) -> tuple[int, float]:
             f"Energy from it:\n{block[:2000]}"
         )
     cycles = int(cycles_match.group(1).replace(",", ""))
-    raw_energy = float(energy_match.group(1).replace(",", ""))
-    energy_uj = raw_energy * _ENERGY_UNIT_TO_UJ[energy_match.group(2).lower()]
-    return cycles, energy_uj
+    raw_energy_text = energy_match.group(1).replace(",", "")
+    unit_to_uj = _ENERGY_UNIT_TO_UJ[energy_match.group(2).lower()]
+    headline_uj = float(raw_energy_text) * unit_to_uj
+
+    table = _energy_uj_from_per_compute_table(block)
+    if table is None:
+        return cycles, headline_uj
+    table_uj, table_half_ulp_uj = table
+
+    # Both values are roundings of the same true energy: the headline to its
+    # printed decimals, the table's Total to 0.01 fJ *per compute* (so its
+    # absolute uncertainty grows with the compute count). They must agree to
+    # within the sum of those two half-ulps -- anything larger means they are
+    # not the same quantity in this TimeLoop build, which is surfaced rather
+    # than guessed. When they do agree, take whichever is tighter: the table
+    # wins for small runs (the case the headline's 0.01 uJ floor ruins), the
+    # headline wins for ~1e9-compute GEMMs where 0.01 fJ x 1e9 > 0.01 uJ.
+    decimals = len(raw_energy_text.split(".", 1)[1]) if "." in raw_energy_text else 0
+    headline_half_ulp_uj = 0.5 * (10.0 ** -decimals) * unit_to_uj
+    tolerance_uj = (headline_half_ulp_uj + table_half_ulp_uj) * (1.0 + 1e-6) + 1e-12
+    if abs(table_uj - headline_uj) > tolerance_uj:
+        raise RuntimeError(
+            "Computes x fJ/Compute Total disagrees with the 'Energy:' headline in "
+            f"{log_path.parent / 'timeloop-mapper.stats.txt'}: "
+            f"{table_uj!r} uJ vs {headline_uj!r} uJ (allowed +/-{tolerance_uj!r}). "
+            f"Summary block:\n{block[:2000]}"
+        )
+    if table_half_ulp_uj < headline_half_ulp_uj:
+        return cycles, table_uj
+    return cycles, headline_uj
+
+
+def _energy_uj_from_per_compute_table(block: str) -> tuple[float, float] | None:
+    """``Computes = N`` x the ``fJ/Compute`` table's ``Total`` (fJ), in uJ.
+
+    Returns ``(energy_uj, half_ulp_uj)`` -- the value and the rounding
+    uncertainty of the Total's printed decimals scaled by N -- or None when
+    either piece is absent (older/other TimeLoop output), so the caller can
+    fall back to the headline ``Energy:`` line.
+    """
+    computes_match = re.search(r"^\s*Computes\s*=\s*([\d,]+)", block, re.MULTILINE)
+    total_match = re.search(
+        r"fJ/Compute\b[\s\S]*?^\s*Total\s*=\s*([\d,.]+(?:[eE][+-]?\d+)?)",
+        block,
+        re.MULTILINE,
+    )
+    if not computes_match or not total_match:
+        return None
+    computes = int(computes_match.group(1).replace(",", ""))
+    total_text = total_match.group(1).replace(",", "")
+    total_fj_per_compute = float(total_text)
+    if "e" in total_text.lower() or "." not in total_text:
+        total_decimals = 0
+    else:
+        total_decimals = len(total_text.split(".", 1)[1])
+    half_ulp_fj = 0.5 * (10.0 ** -total_decimals) * computes
+    return computes * total_fj_per_compute * 1e-9, half_ulp_fj * 1e-9  # fJ -> uJ
 
 
 _ART_ENTRY_RE = re.compile(

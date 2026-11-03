@@ -1,0 +1,92 @@
+{
+  "model": "Llama-3.3-70B/slice20-d704",
+  "input_len": 1024,
+  "output_len": 1024,
+  "clock_ghz": 1.0,
+  "cost_bpe": 2,
+  "decode_cache_lengths_sampled": [
+    1024,
+    1535,
+    2046
+  ],
+  "wafer": {
+    "mesh_rows": 90,
+    "mesh_cols": 100,
+    "sram_kib_per_pe": 48
+  },
+  "results": {
+    "optimistic/batch1": {
+      "metrics": {
+        "batch": 1,
+        "ttft_s": 0.005306545,
+        "itl_s": 0.0004100606666666667,
+        "e2e_s": 0.42479860700000005,
+        "paper_throughput_tok_s": 4821.108088049827,
+        "output_throughput_tok_s": 2410.5540440249133,
+        "decode_throughput_tok_s": 2438.663547345027,
+        "energy_j": 22.689989956717607
+      },
+      "kv_placement": "sram",
+      "sram_kib_for_tiles": 16,
+      "prefill_chunk": 1024,
+      "prefill_passes": 1,
+      "prefill_cycles": 5306545.0,
+      "decode_mean_cycles": 410060.6666666667,
+      "decode_cycles_at": {
+        "1024": 382504.0,
+        "1535": 410364.0,
+        "2046": 436404.0
+      },
+      "prefill_breakdown": "gemm 77%, exp 9%, div 6%, silu 3%, sum 1%, max 1%",
+      "decode_breakdown": "gemm 74%, sum 15%, max 11%, exp 0%, silu 0%, rsqrt 0%"
+    }
+  },
+  "capacity": {
+    "kv_offchip": false,
+    "weights_offchip": false,
+    "dram_capacity_bytes": 0,
+    "bytes_per_elem": 2,
+    "pes": 9000,
+    "sram_bytes_per_pe": 49152,
+    "fifo_router_bytes_per_pe": 10260,
+    "total_sram_bytes": 442368000,
+    "data_sram_bytes": 350028000,
+    "weights_bytes": 269492608,
+    "weights_over_total_sram": 0.6092045717592592,
+    "kv_bytes_per_token": 5120,
+    "peak_cache_tokens": 2047,
+    "kv_tokens_that_fit_total_after_weights": 33764,
+    "kv_tokens_that_fit_data_after_weights": 15729,
+    "per_batch": [
+      {
+        "batch": 1,
+        "kv_bytes": 10480640,
+        "kv_offchip": false,
+        "need_bytes": 279973248,
+        "kv_in_dram_bytes": 0,
+        "dram_need_bytes": 0,
+        "fits_dram": true,
+        "need_over_total_sram": 0.6328967013888889,
+        "need_over_data_sram": 0.7998595769481298,
+        "fits_total_sram": true,
+        "fits_data_sram": true
+      }
+    ],
+    "all_fit_total_sram": true,
+    "all_fit_data_sram": true,
+    "all_fit_dram": true
+  },
+  "offchip_kv": null,
+  "weights_dram": false,
+  "weights_sram_carve_kib": 30,
+  "mac_lanes": 8,
+  "sram_read_bytes_per_cycle": 16,
+  "kv_placement": {
+    "1": "sram"
+  },
+  "kv_placement_policy": "auto",
+  "kv_traffic_added_to_latency": true,
+  "max_tile_k_candidates": 3,
+  "paper_peak_tok_s": {},
+  "wall_s": 5815.728219985962
+}

@@ -31,6 +31,18 @@ class WaferSpec:
     receive_dequeue_latency_cycles: int = 1
     clock_ghz: float = 1.0
 
+    # SIMD / vector width of the PE's multiply-accumulate unit. 1 = this project's own architecture.yaml (one scalar MAC
+    # per cycle, TimeLoop-measured 1.0 cycles/MAC). N > 1 is an IDEAL-SIMD what-if applied in wafer/simulator.py on top of
+    # TimeLoop's measured cycles/MAC (cycles/MAC / N, rounded up per PE per K-phase); it is NOT measured by TimeLoop and
+    # assumes every lane is busy (no remainder loss). Real Cerebras WSE-3: "8-way SIMD for 16b data (FP/BF16)" (Hot Chips
+    # 2024); WSE-2 had 4 FP16 FMACs. Network time (broadcasts) is NOT scaled.
+    mac_lanes: int = 1
+    # Bytes per cycle one PE's SRAM can deliver to the MAC unit for the B (weight) operand. 0 = unlimited (the project's
+    # historical assumption: SRAM bandwidth never binds). > 0 puts a floor on every PE's per-phase compute time of
+    # ceil(B bytes read / this). A is assumed to sit in registers and C to be accumulated there (not modelled).
+    # WSE-2: 2 x 64-bit reads + 1 x 64-bit write per cycle (Hot Chips 2022); WSE-3 per-core width is not published.
+    sram_read_bytes_per_cycle: int = 0
+
     # Process node passed to the real TimeLoop/Accelergy architecture model
     # (compound components require an explicit `technology` attribute).
     technology_node: str = "45nm"
@@ -195,6 +207,10 @@ class WaferSpec:
             raise ValueError("wafer integer resources must be positive")
         if self.clock_ghz <= 0:
             raise ValueError("clock_ghz must be positive")
+        if self.mac_lanes < 1:
+            raise ValueError("mac_lanes must be >= 1")
+        if self.sram_read_bytes_per_cycle < 0:
+            raise ValueError("sram_read_bytes_per_cycle must be >= 0 (0 = unlimited)")
         if self.link_area_um2_per_pe < 0:
             raise ValueError("interconnect area coefficients cannot be negative")
         if self.fifo_router_bytes_per_pe >= self.sram_bytes_per_pe:

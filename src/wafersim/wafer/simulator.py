@@ -90,6 +90,11 @@ def simulate_gemm(contract: GemmMappingContract) -> WaferGemmResult:
     # number in this simulation anchored to TimeLoop's real measurement.
     interior_macs_per_pe = contract.tile_m * contract.tile_n * gemm.k
     cycles_per_mac = contract.local_compute_cycles / interior_macs_per_pe
+    # Ideal-SIMD what-if (WaferSpec.mac_lanes, default 1 = exactly the TimeLoop-measured rate) and an optional SRAM
+    # read-bandwidth floor (WaferSpec.sram_read_bytes_per_cycle, default 0 = unlimited). Neither is TimeLoop-measured;
+    # both are applied per PE per K-phase below. Broadcast/network time is untouched.
+    lanes = max(1, int(getattr(wafer, "mac_lanes", 1)))
+    sram_read_bw = int(getattr(wafer, "sram_read_bytes_per_cycle", 0))
 
     compute_ready = {
         (row, col): 0.0
@@ -169,7 +174,9 @@ def simulate_gemm(contract: GemmMappingContract) -> WaferGemmResult:
                     b_buffer_ready[(row, col)],
                 )
                 macs = m_extent * n_extent * k_extent
-                compute_cycles = ceil(macs * cycles_per_mac)
+                compute_cycles = ceil(macs * cycles_per_mac / lanes)
+                if sram_read_bw:
+                    compute_cycles = max(compute_cycles, ceil(k_extent * n_extent * gemm.bytes_per_element / sram_read_bw))
                 end = start + compute_cycles
 
                 compute_ready[(row, col)] = end

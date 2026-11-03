@@ -6,3 +6,4 @@ timeloop-output/
 .DS_Store
 _to_delete/
 Claude outputs/
+.pytest_cache/

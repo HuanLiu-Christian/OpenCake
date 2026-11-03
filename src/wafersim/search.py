@@ -66,6 +66,7 @@ def search_tile_k(
     out_dir: Path,
     *,
     image: str = "timeloopaccelergy/accelergy-timeloop-infrastructure:latest",
+    max_candidates: int | None = None,
 ) -> list[TileKCandidate]:
     """Evaluate every SRAM-feasible tile_k with a real timeloop-model run
     each, then run the full wafer simulator (PE compute + network) on each
@@ -94,6 +95,13 @@ def search_tile_k(
     tile_m = gemm.m // active_rows  # exact: active_rows is a true divisor of gemm.m
     tile_n = gemm.n // active_cols  # exact: active_cols is a true divisor of gemm.n
     candidates = feasible_tile_k_candidates(gemm, wafer, tile_m, tile_n)
+    if max_candidates is not None:
+        # Candidates come largest tile_k first (fewest K phases). Every candidate costs one Docker run plus a
+        # Python simulate_gemm whose time grows with (active PEs x K phases), so on a big SRAM budget the
+        # exhaustive search is dominated by tiny-tile_k candidates. None (the default) keeps the full search.
+        if max_candidates < 1:
+            raise ValueError("max_candidates must be >= 1")
+        candidates = candidates[:max_candidates]
 
     evaluated: list[TileKCandidate] = []
     for tile_k in candidates:
